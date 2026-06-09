@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: vantum-ops
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      # Set these in the Render dashboard (kept secret). Leave blank to run
+      # with the ephemeral local store (data resets on redeploy).
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false

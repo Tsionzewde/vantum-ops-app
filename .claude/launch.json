@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "vantum-ops",
+      "runtimeExecutable": "C:\\Users\\tsion\\Downloads\\vantum-ops\\.venv\\Scripts\\python.exe",
+      "runtimeArgs": ["C:\\Users\\tsion\\Downloads\\vantum-ops\\app.py"],
+      "port": 5000
+    }
+  ]
+}
