@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { createRoot } from "react-dom/client";
-import ReactFlow, { Background, Controls, MiniMap, ReactFlowProvider } from "reactflow";
+import ReactFlow, { Background, Controls, MiniMap, ReactFlowProvider, Handle, Position } from "reactflow";
 import htm from "htm";
 
 const html = htm.bind(React.createElement);
@@ -10,6 +10,47 @@ function fmtDate(iso) {
   try {
     return new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
   } catch (e) { return iso; }
+}
+
+/* same rich node as the builder so saved maps render identically */
+function VantumNode({ data }) {
+  return html`
+    <div class="vnode" style=${{ borderTop: `3px solid ${data.color || "#059669"}` }}>
+      <${Handle} type="target" position=${Position.Top} />
+      <div class="vnode-head">
+        ${data.num != null && html`<span class="vnode-num" style=${{ background: data.color || "#059669" }}>${data.num}</span>`}
+        <span class="vnode-title">${data.label}</span>
+      </div>
+      ${data.detail && html`<div class="vnode-detail">${data.detail}</div>`}
+      ${data.phase && html`<div class="vnode-phase" style=${{ color: data.color || "#059669" }}>${data.phase}</div>`}
+      <${Handle} type="source" position=${Position.Bottom} />
+    </div>`;
+}
+const nodeTypes = { vantum: VantumNode };
+
+function stepTitle(s) {
+  if (typeof s === "string") return s;
+  return (s && (s.title || s.text || s.step)) || "";
+}
+function stepDetail(s) {
+  return (s && typeof s === "object" && (s.detail || s.description)) || "";
+}
+function stepPhase(s) {
+  return (s && typeof s === "object" && s.phase) || "";
+}
+
+function openFileResource(r) {
+  try {
+    const parts = r.dataUrl.split(",");
+    const mime = ((parts[0].match(/:(.*?);/)) || [])[1] || "application/octet-stream";
+    const bstr = atob(parts[1]);
+    let n = bstr.length;
+    const u8 = new Uint8Array(n);
+    while (n--) u8[n] = bstr.charCodeAt(n);
+    const url = URL.createObjectURL(new Blob([u8], { type: mime }));
+    window.open(url, "_blank", "noopener");
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  } catch (e) {}
 }
 
 function DetailMap({ map }) {
@@ -22,13 +63,13 @@ function DetailMap({ map }) {
     <div class="detail-map">
       <${ReactFlowProvider}>
         <${ReactFlow}
-          nodes=${nodes} edges=${edges}
+          nodes=${nodes} edges=${edges} nodeTypes=${nodeTypes}
           nodesDraggable=${false} nodesConnectable=${false} elementsSelectable=${false}
           fitView proOptions=${{ hideAttribution: true }}>
           <${Background} color="#1B2C45" gap=${22} />
           <${Controls} showInteractive=${false} />
           <${MiniMap} style=${{ background: "#0A1626", border: "1px solid #1B2C45" }}
-            nodeColor=${() => "#059669"} maskColor="rgba(3,10,23,0.6)" />
+            nodeColor=${(n) => (n.data && n.data.color) || "#059669"} maskColor="rgba(3,10,23,0.6)" />
         <//>
       <//>
     </div>`;
@@ -51,9 +92,7 @@ function Detail({ project, onBack }) {
           <div class="card">
             <span class="panel-title">Goal</span>
             <div>${project.goal || html`<span class="muted">—</span>`}</div>
-            <hr class="divider" />
-            <span class="panel-title">Team</span>
-            <div>${project.team || html`<span class="muted">—</span>`}</div>
+            ${project.team && html`<hr class="divider" /><span class="panel-title">Team</span><div>${project.team}</div>`}
           </div>
           <div class="card">
             <span class="panel-title">Written process</span>
@@ -61,13 +100,30 @@ function Detail({ project, onBack }) {
             ${steps.map((s, i) => html`
               <div class="step-row" key=${i} style=${{ alignItems: "flex-start" }}>
                 <span class="step-num">${i + 1}</span>
-                <div style=${{ flex: 1, fontSize: "14px", lineHeight: 1.5, paddingTop: "3px" }}>${typeof s === "string" ? s : JSON.stringify(s)}</div>
+                <div style=${{ flex: 1, paddingTop: "3px" }}>
+                  <div style=${{ fontSize: "14px", lineHeight: 1.5 }}>${stepTitle(s)}
+                    ${stepPhase(s) && html` <span class="phase-chip">${stepPhase(s)}</span>`}
+                  </div>
+                  ${stepDetail(s) && html`<div class="muted" style=${{ marginTop: "2px" }}>${stepDetail(s)}</div>`}
+                </div>
               </div>`)}
           </div>
           <div class="card">
             <span class="panel-title">Resources</span>
             ${resources.length === 0 && html`<div class="muted">None.</div>`}
-            <div>${resources.map((r, i) => html`<span class="list-tag" key=${i}>${typeof r === "string" ? r : JSON.stringify(r)}</span>`)}</div>
+            <div>
+              ${resources.map((r, i) => {
+                if (r && r.kind === "file") {
+                  return html`<div class="res-file" key=${i}>
+                    <svg class="res-icon" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm4 18H6V4h7v5h5v11z"/></svg>
+                    <span class="res-name">${r.name}</span>
+                    <button type="button" class="mini" onClick=${() => openFileResource(r)}>Open</button>
+                  </div>`;
+                }
+                const label = typeof r === "string" ? r : (r && (r.value || r.name)) || "";
+                return html`<span class="list-tag" key=${i}>${label}</span>`;
+              })}
+            </div>
           </div>
         </div>
         <div>

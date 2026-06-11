@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback, useEffect } from "react";
+import React, { useState, useRef, useCallback } from "react";
 import { createRoot } from "react-dom/client";
 import ReactFlow, {
   Background,
@@ -10,23 +10,15 @@ import ReactFlow, {
   addEdge,
   updateEdge,
   MarkerType,
+  Handle,
+  Position,
 } from "reactflow";
 import htm from "htm";
 
 const html = htm.bind(React.createElement);
 
 /* ---------------- constants ---------------- */
-const NODE_STYLE = {
-  background: "linear-gradient(180deg,#0E1C30,#0A1626)",
-  color: "#fff",
-  border: "1px solid #1B2C45",
-  borderRadius: "12px",
-  padding: "10px 14px",
-  fontSize: "13px",
-  fontWeight: 600,
-  width: 190,
-  textAlign: "center",
-};
+const PHASE_COLORS = ["#059669", "#C97B00", "#3B82F6", "#A855F7", "#14B8A6", "#E0527A"];
 
 const EDGE_OPTS = {
   animated: true,
@@ -34,11 +26,19 @@ const EDGE_OPTS = {
   markerEnd: { type: MarkerType.ArrowClosed, color: "#059669" },
 };
 
+const MAX_FILE_BYTES = 1.5 * 1024 * 1024; // per uploaded resource
+
+const EXAMPLE_DESC =
+  "I want to build a free “5-Day Email Audit” guide as a lead magnet to grow my newsletter. " +
+  "Goal: collect 300 emails in 30 days. I'll write the guide in Google Docs, design it in Canva, " +
+  "build a landing page in Carrd, hook up Mailchimp to deliver it, and promote it on LinkedIn for two weeks.";
+
 const PROCESS_PROMPT = (desc) =>
 `You are Vantum Ops. I have a new project.
-Extract: project name, goal, team, numbered steps, and resources.
-Then return the result as JSON in this format:
-{name, goal, team, steps[], resources[]}
+Extract: project name, goal, numbered steps, and resources.
+Each step needs: a short title (3-6 words), a one-line detail explaining what exactly happens in that step, and a phase that groups related steps (e.g. "Plan", "Build", "Launch", "Review").
+Return ONLY JSON in this exact format, nothing else:
+{"name":"","goal":"","steps":[{"title":"","detail":"","phase":""}],"resources":[""]}
 My project: ${desc}`;
 
 const CHANGE_PROMPT = (state, change) =>
@@ -47,8 +47,8 @@ ${JSON.stringify(state, null, 2)}
 
 Requested change: ${change}
 
-Apply the change and return the full updated project as JSON in this exact format:
-{name, goal, team, steps[], resources[]}`;
+Apply the change and return ONLY the full updated project as JSON in this exact format, nothing else:
+{"name":"","goal":"","steps":[{"title":"","detail":"","phase":""}],"resources":[""]}`;
 
 /* ---------------- helpers ---------------- */
 let toastEl = null;
@@ -103,10 +103,8 @@ function openClaude(prompt) {
 function parseClaudeJSON(raw) {
   if (!raw || !raw.trim()) throw new Error("empty");
   let txt = raw.trim();
-  // strip code fences
   const fence = txt.match(/```(?:json)?\s*([\s\S]*?)```/i);
   if (fence) txt = fence[1].trim();
-  // grab the outermost object
   const start = txt.indexOf("{");
   const end = txt.lastIndexOf("}");
   if (start === -1 || end === -1) throw new Error("no JSON object found");
@@ -116,12 +114,45 @@ function parseClaudeJSON(raw) {
 let SEQ = 0;
 const newId = (p) => `${p}-${SEQ++}`;
 
+function normalizeStep(s, i) {
+  if (typeof s === "string") return { id: newId("step"), text: s, detail: "", phase: "" };
+  return {
+    id: newId("step"),
+    text: (s && (s.title || s.step || s.text || s.name)) || `Step ${i + 1}`,
+    detail: (s && (s.detail || s.description)) || "",
+    phase: (s && s.phase) || "",
+  };
+}
+
+function normalizeResource(r) {
+  if (typeof r === "string") return { kind: "text", value: r };
+  if (r && r.kind) return r;
+  return { kind: "text", value: (r && (r.name || r.value)) || String(r) };
+}
+
+function phaseColorMap(steps) {
+  const map = {};
+  let idx = 0;
+  steps.forEach((s) => {
+    const ph = (s.phase || "").trim();
+    if (ph && !(ph in map)) map[ph] = PHASE_COLORS[idx++ % PHASE_COLORS.length];
+  });
+  return map;
+}
+
 function buildFlowFromSteps(steps) {
+  const colors = phaseColorMap(steps);
   const nodes = steps.map((s, i) => ({
     id: s.id,
-    data: { label: s.text || `Step ${i + 1}` },
-    position: { x: 130, y: 60 + i * 110 },
-    style: NODE_STYLE,
+    type: "vantum",
+    data: {
+      label: s.text || `Step ${i + 1}`,
+      detail: s.detail || "",
+      phase: s.phase || "",
+      color: colors[(s.phase || "").trim()] || "#059669",
+      num: i + 1,
+    },
+    position: { x: 140, y: 50 + i * 150 },
   }));
   const edges = [];
   for (let i = 0; i < steps.length - 1; i++) {
@@ -130,17 +161,33 @@ function buildFlowFromSteps(steps) {
   return { nodes, edges };
 }
 
+/* ---------------- custom node ---------------- */
+function VantumNode({ data }) {
+  return html`
+    <div class="vnode" style=${{ borderTop: `3px solid ${data.color || "#059669"}` }}>
+      <${Handle} type="target" position=${Position.Top} />
+      <div class="vnode-head">
+        ${data.num != null && html`<span class="vnode-num" style=${{ background: data.color || "#059669" }}>${data.num}</span>`}
+        <span class="vnode-title">${data.label}</span>
+      </div>
+      ${data.detail && html`<div class="vnode-detail">${data.detail}</div>`}
+      ${data.phase && html`<div class="vnode-phase" style=${{ color: data.color || "#059669" }}>${data.phase}</div>`}
+      <${Handle} type="source" position=${Position.Bottom} />
+    </div>`;
+}
+const nodeTypes = { vantum: VantumNode };
+
 /* ---------------- App ---------------- */
 function App() {
   const [desc, setDesc] = useState("");
+  const [guideOpen, setGuideOpen] = useState(false);
   const [pasteOpen, setPasteOpen] = useState(false);
   const [rawJson, setRawJson] = useState("");
 
   const [name, setName] = useState("");
   const [goal, setGoal] = useState("");
-  const [team, setTeam] = useState("");
-  const [steps, setSteps] = useState([]); // [{id, text}]
-  const [resources, setResources] = useState([]); // [string]
+  const [steps, setSteps] = useState([]); // [{id, text, detail, phase}]
+  const [resources, setResources] = useState([]); // [{kind:'text'|'file', ...}]
 
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
@@ -151,12 +198,13 @@ function App() {
   const [savedId, setSavedId] = useState(null);
 
   const edgeUpdateOk = useRef(true);
+  const fileInputRef = useRef(null);
   const locked = status === "Approved";
   const hasContent = Boolean(name || steps.length || nodes.length);
 
   /* ----- Claude: process description ----- */
   function processWithClaude() {
-    if (!desc.trim()) { toast("Describe your project first."); return; }
+    if (!desc.trim()) { toast("Describe your project first — open the guide if you're unsure."); return; }
     openClaude(PROCESS_PROMPT(desc.trim()));
   }
 
@@ -171,15 +219,9 @@ function App() {
     }
     setName(data.name || "");
     setGoal(data.goal || "");
-    setTeam(data.team || "");
-    const rawSteps = Array.isArray(data.steps) ? data.steps : [];
-    const newSteps = rawSteps.map((s) => ({
-      id: newId("step"),
-      text: typeof s === "string" ? s : (s && (s.step || s.text || s.name)) || String(s),
-    }));
+    const newSteps = (Array.isArray(data.steps) ? data.steps : []).map(normalizeStep);
     setSteps(newSteps);
-    const rawRes = Array.isArray(data.resources) ? data.resources : [];
-    setResources(rawRes.map((r) => (typeof r === "string" ? r : (r && (r.name || r.resource)) || String(r))));
+    setResources((Array.isArray(data.resources) ? data.resources : []).map(normalizeResource));
     const flow = buildFlowFromSteps(newSteps);
     setNodes(flow.nodes);
     setEdges(flow.edges);
@@ -191,26 +233,31 @@ function App() {
   }
 
   /* ----- steps ----- */
-  function updateStep(id, text) {
-    setSteps((arr) => arr.map((s) => (s.id === id ? { ...s, text } : s)));
-    setNodes((ns) => ns.map((n) => (n.id === id ? { ...n, data: { ...n.data, label: text } } : n)));
+  function patchStep(id, patch) {
+    setSteps((arr) => arr.map((s) => (s.id === id ? { ...s, ...patch } : s)));
+    setNodes((ns) => ns.map((n) => {
+      if (n.id !== id) return n;
+      const d = { ...n.data };
+      if ("text" in patch) d.label = patch.text;
+      if ("detail" in patch) d.detail = patch.detail;
+      if ("phase" in patch) d.phase = patch.phase;
+      return { ...n, data: d };
+    }));
   }
   function addStep() {
     const id = newId("step");
-    const s = { id, text: "" };
-    setSteps((arr) => [...arr, s]);
-    setNodes((ns) => ns.concat({
-      id, data: { label: "New step" },
-      position: { x: 130, y: 60 + ns.length * 110 }, style: NODE_STYLE,
-    }));
-    // link from previous step node if any
     setSteps((arr) => {
-      if (arr.length > 1) {
-        const prev = arr[arr.length - 2];
+      const prev = arr[arr.length - 1];
+      if (prev) {
         setEdges((es) => addEdge({ id: `e-${prev.id}-${id}`, source: prev.id, target: id, ...EDGE_OPTS }, es));
       }
-      return arr;
+      return [...arr, { id, text: "", detail: "", phase: "" }];
     });
+    setNodes((ns) => ns.concat({
+      id, type: "vantum",
+      data: { label: "New step", detail: "", phase: "", color: "#059669", num: ns.length + 1 },
+      position: { x: 140, y: 50 + ns.length * 150 },
+    }));
   }
   function removeStep(id) {
     setSteps((arr) => arr.filter((s) => s.id !== id));
@@ -225,9 +272,41 @@ function App() {
   }
 
   /* ----- resources ----- */
-  const updateResource = (i, v) => setResources((a) => a.map((r, idx) => (idx === i ? v : r)));
-  const addResource = () => setResources((a) => [...a, ""]);
+  const addTextResource = () => setResources((a) => [...a, { kind: "text", value: "" }]);
+  const patchResource = (i, v) => setResources((a) => a.map((r, idx) => (idx === i ? { ...r, value: v } : r)));
   const removeResource = (i) => setResources((a) => a.filter((_, idx) => idx !== i));
+
+  function onFilePicked(e) {
+    const files = Array.from(e.target.files || []);
+    files.forEach((file) => {
+      if (file.size > MAX_FILE_BYTES) {
+        toast(`"${file.name}" is too big — keep uploads under 1.5 MB each.`);
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        setResources((a) => [...a, { kind: "file", name: file.name, size: file.size, dataUrl: reader.result }]);
+      };
+      reader.readAsDataURL(file);
+    });
+    e.target.value = "";
+  }
+
+  function openResourceFile(r) {
+    try {
+      const parts = r.dataUrl.split(",");
+      const mime = ((parts[0].match(/:(.*?);/)) || [])[1] || "application/octet-stream";
+      const bstr = atob(parts[1]);
+      let n = bstr.length;
+      const u8 = new Uint8Array(n);
+      while (n--) u8[n] = bstr.charCodeAt(n);
+      const url = URL.createObjectURL(new Blob([u8], { type: mime }));
+      window.open(url, "_blank", "noopener");
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (e) { toast("Couldn't open that file."); }
+  }
+
+  const fmtSize = (b) => (b < 1024 ? b + " B" : b < 1048576 ? (b / 1024).toFixed(1) + " KB" : (b / 1048576).toFixed(1) + " MB");
 
   /* ----- flow editing ----- */
   const onConnect = useCallback((params) => setEdges((eds) => addEdge({ ...params, ...EDGE_OPTS }, eds)), [setEdges]);
@@ -244,8 +323,9 @@ function App() {
   function addNode() {
     const id = newId("node");
     setNodes((ns) => ns.concat({
-      id, data: { label: "New box" },
-      position: { x: 360, y: 80 + (ns.length % 6) * 70 }, style: NODE_STYLE,
+      id, type: "vantum",
+      data: { label: "New box", detail: "", phase: "", color: "#059669", num: null },
+      position: { x: 420, y: 80 + (ns.length % 6) * 80 },
     }));
   }
 
@@ -253,9 +333,9 @@ function App() {
   function changeWithClaude() {
     if (!changeText.trim()) { toast("Type what you'd like Claude to change."); return; }
     const state = {
-      name, goal, team,
-      steps: steps.map((s) => s.text),
-      resources,
+      name, goal,
+      steps: steps.map((s) => ({ title: s.text, detail: s.detail, phase: s.phase })),
+      resources: resources.map((r) => (r.kind === "file" ? r.name + " (uploaded file)" : r.value)),
       map: {
         nodes: nodes.map((n) => ({ id: n.id, label: n.data.label, position: n.position })),
         edges: edges.map((e) => ({ source: e.source, target: e.target })),
@@ -269,8 +349,8 @@ function App() {
     if (!name.trim()) { toast("Add a project name before saving."); return; }
     setSaving(true);
     const payload = {
-      name, goal, team,
-      steps: steps.map((s) => s.text),
+      name, goal,
+      steps: steps.map((s) => ({ title: s.text, detail: s.detail, phase: s.phase })),
       resources,
       map_data: { nodes, edges },
       status: "Approved",
@@ -302,13 +382,32 @@ function App() {
           <div class="field">
             <label>Describe your project</label>
             <textarea
-              placeholder="Describe your project... goals, who's involved, what needs to happen."
+              placeholder="Describe your project... what it is, the goal, the main steps, and the tools you'll use."
               value=${desc}
               disabled=${locked}
               onInput=${(e) => setDesc(e.target.value)}
               rows="4"></textarea>
           </div>
-          <div class="row">
+
+          <div class="guide ${guideOpen ? "open" : ""}">
+            <button type="button" class="guide-toggle" onClick=${() => setGuideOpen(!guideOpen)}>
+              💡 How to describe your project ${guideOpen ? "▴" : "▾"}
+            </button>
+            ${guideOpen && html`
+              <div class="guide-body">
+                <div class="muted" style=${{ marginBottom: "8px" }}>The more of these you include, the better the breakdown:</div>
+                <ul>
+                  <li><strong>What it is</strong> — “a lead magnet PDF”, “a 5-email welcome sequence”…</li>
+                  <li><strong>The goal, with a number</strong> — “collect 300 emails in 30 days”</li>
+                  <li><strong>The main actions in order</strong> — write → design → build page → connect email → promote</li>
+                  <li><strong>Tools you'll use</strong> — Canva, Mailchimp, Carrd, LinkedIn…</li>
+                  <li><strong>Timeline or deadline</strong> — “launch in two weeks”</li>
+                </ul>
+                <button type="button" class="btn-ghost btn-small" onClick=${() => { setDesc(EXAMPLE_DESC); setGuideOpen(false); }}>Insert example</button>
+              </div>`}
+          </div>
+
+          <div class="row" style=${{ marginTop: "12px" }}>
             <button class="btn-primary" disabled=${locked} onClick=${processWithClaude}>Process with Claude</button>
             <button class="btn-ghost" disabled=${locked} onClick=${() => setPasteOpen(true)}>Paste Claude Output</button>
           </div>
@@ -328,10 +427,6 @@ function App() {
               <label>Goal</label>
               <textarea value=${goal} disabled=${locked} onInput=${(e) => setGoal(e.target.value)} rows="2" placeholder="What is the goal?"></textarea>
             </div>
-            <div class="field">
-              <label>Team</label>
-              <input value=${team} disabled=${locked} onInput=${(e) => setTeam(e.target.value)} placeholder="Who is involved?" />
-            </div>
           </div>
 
           <div class="card">
@@ -341,10 +436,16 @@ function App() {
             </div>
             ${steps.length === 0 && html`<div class="muted">No steps yet.</div>`}
             ${steps.map((s, i) => html`
-              <div class="step-row" key=${s.id}>
-                <span class="step-num">${i + 1}</span>
-                <input value=${s.text} disabled=${locked} onInput=${(e) => updateStep(s.id, e.target.value)} placeholder=${"Step " + (i + 1)} />
-                ${!locked && html`<button class="x" onClick=${() => removeStep(s.id)}>✕</button>`}
+              <div class="step-block" key=${s.id}>
+                <div class="step-row">
+                  <span class="step-num">${i + 1}</span>
+                  <input class="step-title" value=${s.text} disabled=${locked} onInput=${(e) => patchStep(s.id, { text: e.target.value })} placeholder=${"Step " + (i + 1)} />
+                  ${!locked && html`<button class="x" onClick=${() => removeStep(s.id)}>✕</button>`}
+                </div>
+                <div class="step-sub">
+                  <input class="step-detail" value=${s.detail} disabled=${locked} onInput=${(e) => patchStep(s.id, { detail: e.target.value })} placeholder="Detail — what exactly happens here?" />
+                  <input class="step-phase" value=${s.phase} disabled=${locked} onInput=${(e) => patchStep(s.id, { phase: e.target.value })} placeholder="Phase" />
+                </div>
               </div>
             `)}
             ${!locked && html`<button class="btn-ghost btn-small" style=${{ marginTop: "8px" }} onClick=${addStep}>+ Add step</button>`}
@@ -352,14 +453,28 @@ function App() {
 
           <div class="card">
             <span class="panel-title">Resources</span>
-            ${resources.length === 0 && html`<div class="muted">No resources yet.</div>`}
-            ${resources.map((r, i) => html`
-              <div class="step-row" key=${"r" + i}>
-                <input value=${r} disabled=${locked} onInput=${(e) => updateResource(i, e.target.value)} placeholder="Resource" />
-                ${!locked && html`<button class="x" onClick=${() => removeResource(i)}>✕</button>`}
+            ${resources.length === 0 && html`<div class="muted">No resources yet — add tools/links or upload files.</div>`}
+            ${resources.map((r, i) => r.kind === "file"
+              ? html`
+                <div class="res-file" key=${"r" + i}>
+                  <svg class="res-icon" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm4 18H6V4h7v5h5v11z"/></svg>
+                  <span class="res-name">${r.name}</span>
+                  <span class="res-size">${fmtSize(r.size || 0)}</span>
+                  <button type="button" class="mini" onClick=${() => openResourceFile(r)}>Open</button>
+                  ${!locked && html`<button type="button" class="mini x2" onClick=${() => removeResource(i)}>Remove</button>`}
+                </div>`
+              : html`
+                <div class="step-row" key=${"r" + i}>
+                  <input value=${r.value} disabled=${locked} onInput=${(e) => patchResource(i, e.target.value)} placeholder="Tool, link or resource" />
+                  ${!locked && html`<button class="x" onClick=${() => removeResource(i)}>✕</button>`}
+                </div>`)}
+            ${!locked && html`
+              <div class="row" style=${{ marginTop: "10px" }}>
+                <button class="btn-ghost btn-small" onClick=${addTextResource}>+ Add link / tool</button>
+                <button class="btn-ghost btn-small" onClick=${() => fileInputRef.current && fileInputRef.current.click()}>⬆ Upload file</button>
               </div>
-            `)}
-            ${!locked && html`<button class="btn-ghost btn-small" style=${{ marginTop: "8px" }} onClick=${addResource}>+ Add resource</button>`}
+              <input type="file" multiple style=${{ display: "none" }} ref=${fileInputRef} onChange=${onFilePicked} />
+              <div class="muted" style=${{ marginTop: "8px" }}>Files up to 1.5 MB each — PDFs, docs, images.</div>`}
           </div>
 
           <div class="card" style=${{ display: "flex", gap: "10px", alignItems: "center" }}>
@@ -393,6 +508,7 @@ function App() {
           <${ReactFlow}
             nodes=${nodes}
             edges=${edges}
+            nodeTypes=${nodeTypes}
             onNodesChange=${locked ? undefined : onNodesChange}
             onEdgesChange=${locked ? undefined : onEdgesChange}
             onConnect=${locked ? undefined : onConnect}
@@ -410,7 +526,7 @@ function App() {
             <${Controls} showInteractive=${false} />
             <${MiniMap} pannable zoomable
               style=${{ background: "#0A1626", border: "1px solid #1B2C45" }}
-              nodeColor=${() => "#059669"} maskColor="rgba(3,10,23,0.6)" />
+              nodeColor=${(n) => (n.data && n.data.color) || "#059669"} maskColor="rgba(3,10,23,0.6)" />
           <//>
         </div>
 
@@ -431,7 +547,7 @@ function App() {
           <h2>Paste Claude Output</h2>
           <p class="modal-sub">Paste the JSON Claude returned. The app extracts the {…} block automatically.</p>
           <div class="field">
-            <textarea rows="12" placeholder=${'{\n  "name": "...",\n  "goal": "...",\n  "team": "...",\n  "steps": ["..."],\n  "resources": ["..."]\n}'}
+            <textarea rows="12" placeholder=${'{\n  "name": "...",\n  "goal": "...",\n  "steps": [{"title": "...", "detail": "...", "phase": "..."}],\n  "resources": ["..."]\n}'}
               value=${rawJson} onInput=${(e) => setRawJson(e.target.value)}></textarea>
           </div>
           <div class="modal-actions">
