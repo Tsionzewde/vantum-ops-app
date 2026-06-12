@@ -376,8 +376,24 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .flow-wrap { position: absolute; inset: 0 0 72px 0; }
 .flow-toolbar {
   position: absolute;
-  top: 14px; left: 14px;
+  top: 14px; left: 132px;
   display: flex; gap: 8px; z-index: 6;
+}
+.panel-toggle {
+  position: absolute;
+  top: 14px; left: 14px;
+  z-index: 7;
+  background: var(--panel-2);
+}
+.panel.left {
+  transition: width .2s ease, min-width .2s ease, padding .2s ease;
+}
+.panel.left.collapsed {
+  width: 0;
+  min-width: 0;
+  padding: 0;
+  border-right: none;
+  overflow: hidden;
 }
 .flow-bar {
   position: absolute;
@@ -456,6 +472,29 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .proj-card .date { font-size: 12px; color: var(--muted-2); }
 
 .detail-map { height: 60vh; border: 1px solid var(--border); border-radius: 14px; overflow: hidden; position: relative; }
+.detail-map.expanded {
+  position: fixed;
+  inset: 14px;
+  height: auto;
+  z-index: 90;
+  background: var(--bg);
+  box-shadow: 0 24px 80px rgba(0,0,0,0.6);
+}
+.map-expand {
+  position: absolute;
+  top: 10px; right: 10px;
+  z-index: 8;
+  background: var(--panel-2);
+}
+
+/* connection handles on all four sides */
+.react-flow__handle {
+  width: 9px;
+  height: 9px;
+  background: var(--green);
+  border: 2px solid var(--bg);
+}
+.react-flow__handle:hover { background: #06d391; }
 
 /* ---------- toast ---------- */
 .toast {

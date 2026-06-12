@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from "react";
+import React, { useState, useRef, useCallback, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import ReactFlow, {
   Background,
@@ -12,6 +12,7 @@ import ReactFlow, {
   MarkerType,
   Handle,
   Position,
+  useStoreApi,
 } from "reactflow";
 import htm from "htm";
 
@@ -112,7 +113,7 @@ function parseClaudeJSON(raw) {
 }
 
 let SEQ = 0;
-const newId = (p) => `${p}-${SEQ++}`;
+const newId = (p) => `${p}-${Math.random().toString(36).slice(2, 7)}-${SEQ++}`;
 
 function normalizeStep(s, i) {
   if (typeof s === "string") return { id: newId("step"), text: s, detail: "", phase: "" };
@@ -142,6 +143,26 @@ function phaseColorMap(steps) {
 
 function buildFlowFromSteps(steps) {
   const colors = phaseColorMap(steps);
+
+  // Branch layout: one column per phase; steps flow down a column and
+  // branch sideways into the next phase. Without phases, wrap every 4.
+  const phaseOf = (s) => (s.phase || "").trim() || "__none__";
+  const phaseOrder = [];
+  steps.forEach((s) => { const p = phaseOf(s); if (!phaseOrder.includes(p)) phaseOrder.push(p); });
+
+  let columns;
+  if (phaseOrder.length > 1) {
+    columns = phaseOrder.map((p) => steps.filter((s) => phaseOf(s) === p));
+  } else {
+    columns = [];
+    for (let i = 0; i < steps.length; i += 4) columns.push(steps.slice(i, i + 4));
+  }
+
+  const place = {};
+  columns.forEach((col, ci) => col.forEach((s, ri) => {
+    place[s.id] = { x: 60 + ci * 300, y: 50 + ri * 175, col: ci };
+  }));
+
   const nodes = steps.map((s, i) => ({
     id: s.id,
     type: "vantum",
@@ -152,11 +173,20 @@ function buildFlowFromSteps(steps) {
       color: colors[(s.phase || "").trim()] || "#059669",
       num: i + 1,
     },
-    position: { x: 140, y: 50 + i * 150 },
+    position: { x: place[s.id].x, y: place[s.id].y },
   }));
+
   const edges = [];
   for (let i = 0; i < steps.length - 1; i++) {
-    edges.push({ id: `e-${steps[i].id}-${steps[i + 1].id}`, source: steps[i].id, target: steps[i + 1].id, ...EDGE_OPTS });
+    const a = steps[i], b = steps[i + 1];
+    const sameCol = place[a.id].col === place[b.id].col;
+    edges.push({
+      id: `e-${a.id}-${b.id}`,
+      source: a.id, target: b.id,
+      sourceHandle: sameCol ? "out-b" : "out-r",
+      targetHandle: sameCol ? "in-t" : "in-l",
+      ...EDGE_OPTS,
+    });
   }
   return { nodes, edges };
 }
@@ -165,17 +195,48 @@ function buildFlowFromSteps(steps) {
 function VantumNode({ data }) {
   return html`
     <div class="vnode" style=${{ borderTop: `3px solid ${data.color || "#059669"}` }}>
-      <${Handle} type="target" position=${Position.Top} />
+      <${Handle} id="in-t" type="target" position=${Position.Top} />
+      <${Handle} id="in-l" type="target" position=${Position.Left} />
       <div class="vnode-head">
         ${data.num != null && html`<span class="vnode-num" style=${{ background: data.color || "#059669" }}>${data.num}</span>`}
         <span class="vnode-title">${data.label}</span>
       </div>
       ${data.detail && html`<div class="vnode-detail">${data.detail}</div>`}
       ${data.phase && html`<div class="vnode-phase" style=${{ color: data.color || "#059669" }}>${data.phase}</div>`}
-      <${Handle} type="source" position=${Position.Bottom} />
+      <${Handle} id="out-b" type="source" position=${Position.Bottom} />
+      <${Handle} id="out-r" type="source" position=${Position.Right} />
     </div>`;
 }
 const nodeTypes = { vantum: VantumNode };
+
+/* Workaround: this build doesn't auto-measure nodes on mount, which silently
+   drops edges (no handle bounds). Force-measure nodes until bounds exist. */
+function MeasureFix({ ids }) {
+  const store = useStoreApi();
+  useEffect(() => {
+    if (!ids.length) return;
+    let tries = 0;
+    let timer = null;
+    const tick = () => {
+      const s = store.getState();
+      const updates = ids
+        .map((id) => ({
+          id,
+          nodeElement: (s.domNode || document).querySelector(`.react-flow__node[data-id="${id}"]`),
+          forceUpdate: true,
+        }))
+        .filter((u) => u.nodeElement);
+      if (updates.length) s.updateNodeDimensions(updates);
+      const first = s.nodeInternals.get(ids[0]);
+      const sym = first ? Object.getOwnPropertySymbols(first)[0] : null;
+      const measured = first && sym && first[sym] && first[sym].handleBounds;
+      if (!measured && tries++ < 12) timer = setTimeout(tick, 120);
+    };
+    timer = setTimeout(tick, 80);
+    return () => clearTimeout(timer);
+  }, [ids.join("|")]);
+  return null;
+}
 
 /* ---------------- App ---------------- */
 function App() {
@@ -196,11 +257,45 @@ function App() {
   const [changeText, setChangeText] = useState("");
   const [saving, setSaving] = useState(false);
   const [savedId, setSavedId] = useState(null);
+  const [editingId, setEditingId] = useState(null);
+  const [panelOpen, setPanelOpen] = useState(true);
 
   const edgeUpdateOk = useRef(true);
   const fileInputRef = useRef(null);
   const locked = status === "Approved";
   const hasContent = Boolean(name || steps.length || nodes.length);
+
+  /* ----- load an archived project for editing (?edit=<id>) ----- */
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get("edit");
+    if (!id) return;
+    fetch("/api/projects/" + id)
+      .then((r) => r.json())
+      .then((p) => {
+        if (!p || p.error) { toast("Couldn't load that project."); return; }
+        setEditingId(p.id);
+        setName(p.name || "");
+        setGoal(p.goal || "");
+        const ns = (Array.isArray(p.steps) ? p.steps : []).map(normalizeStep);
+        const savedNodes = (p.map_data && Array.isArray(p.map_data.nodes)) ? p.map_data.nodes : [];
+        if (savedNodes.length && savedNodes.length === ns.length) {
+          // adopt saved node ids so inline step edits stay linked to the map
+          const ordered = [...savedNodes].sort((a, b) => ((a.data && a.data.num) || 0) - ((b.data && b.data.num) || 0));
+          ordered.forEach((n, i) => { if (ns[i]) ns[i].id = n.id; });
+          setNodes(savedNodes);
+          setEdges((p.map_data && p.map_data.edges) || []);
+        } else {
+          const flow = buildFlowFromSteps(ns);
+          setNodes(flow.nodes);
+          setEdges(flow.edges);
+        }
+        setSteps(ns);
+        setResources((Array.isArray(p.resources) ? p.resources : []).map(normalizeResource));
+        setStatus("Active");
+        toast("Editing saved project — Approve & Save updates the archive copy.");
+      })
+      .catch(() => toast("Couldn't load that project."));
+  }, []);
 
   /* ----- Claude: process description ----- */
   function processWithClaude() {
@@ -356,16 +451,17 @@ function App() {
       status: "Approved",
     };
     try {
-      const res = await fetch("/api/projects", {
-        method: "POST",
+      const res = await fetch(editingId ? "/api/projects/" + editingId : "/api/projects", {
+        method: editingId ? "PUT" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
       if (!res.ok) throw new Error("save failed");
       const saved = await res.json();
       setSavedId(saved.id);
+      setEditingId(saved.id);
       setStatus("Approved");
-      toast("Approved & saved. This project is now locked.");
+      toast(editingId ? "Updated & saved to the archive." : "Approved & saved. This project is now locked.");
     } catch (e) {
       toast("Save failed — check the server / Supabase connection.");
     } finally {
@@ -377,7 +473,7 @@ function App() {
   return html`
     <div class="layout">
       <!-- LEFT -->
-      <div class="panel left">
+      <div class=${"panel left" + (panelOpen ? "" : " collapsed")}>
         <div class="card">
           <div class="field">
             <label>Describe your project</label>
@@ -479,9 +575,12 @@ function App() {
 
           <div class="card" style=${{ display: "flex", gap: "10px", alignItems: "center" }}>
             ${locked
-              ? html`<div style=${{ flex: 1 }}>
-                  <strong style=${{ color: "#34d399" }}>Approved & locked.</strong>
-                  ${savedId && html` <a href="/archive" style=${{ color: "#6ba4ff" }}>View in archive →</a>`}
+              ? html`<div style=${{ flex: 1, display: "flex", alignItems: "center", gap: "10px" }}>
+                  <div style=${{ flex: 1 }}>
+                    <strong style=${{ color: "#34d399" }}>Approved & locked.</strong>
+                    ${savedId && html` <a href="/archive" style=${{ color: "#6ba4ff" }}>View in archive →</a>`}
+                  </div>
+                  <button class="btn-ghost btn-small" onClick=${() => setStatus("Active")}>Edit again</button>
                 </div>`
               : html`<button class="btn-primary" style=${{ flex: 1 }} disabled=${saving} onClick=${approveSave}>
                   ${saving ? "Saving…" : "Approve & Save"}
@@ -493,6 +592,10 @@ function App() {
       <!-- RIGHT -->
       <div class="panel right">
         <div class="flow-wrap">
+          <button class="btn-ghost btn-small panel-toggle" title=${panelOpen ? "Hide the details panel" : "Show the details panel"}
+            onClick=${() => setPanelOpen(!panelOpen)}>
+            ${panelOpen ? "⮜ Hide panel" : "⮞ Show panel"}
+          </button>
           ${nodes.length === 0 && html`
             <div class="empty-canvas">
               <div>
@@ -522,6 +625,7 @@ function App() {
             defaultEdgeOptions=${EDGE_OPTS}
             fitView
             proOptions=${{ hideAttribution: true }}>
+            <${MeasureFix} ids=${nodes.map((n) => n.id)} />
             <${Background} color="#1B2C45" gap=${22} />
             <${Controls} showInteractive=${false} />
             <${MiniMap} pannable zoomable

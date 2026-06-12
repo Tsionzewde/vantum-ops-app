@@ -92,6 +92,23 @@ def create_project(payload):
     return record
 
 
+def update_project(pid, payload):
+    record = {k: payload[k] for k in
+              ("name", "goal", "team", "steps", "resources", "map_data", "status")
+              if k in payload}
+    if supabase:
+        res = supabase.table(TABLE).update(record).eq("id", pid).execute()
+        data = res.data or []
+        return data[0] if data else None
+    rows = _local_load()
+    for row in rows:
+        if str(row.get("id")) == str(pid):
+            row.update(record)
+            _local_save(rows)
+            return row
+    return None
+
+
 # ---------------- pages ----------------
 @app.route("/")
 def index():
@@ -128,6 +145,18 @@ def api_create():
     try:
         created = create_project(payload)
         return jsonify(created), 201
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/projects/<pid>", methods=["PUT"])
+def api_update(pid):
+    payload = request.get_json(force=True, silent=True) or {}
+    try:
+        updated = update_project(pid, payload)
+        if not updated:
+            return jsonify({"error": "not found"}), 404
+        return jsonify(updated)
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
 

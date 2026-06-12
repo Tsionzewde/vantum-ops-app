@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { createRoot } from "react-dom/client";
-import ReactFlow, { Background, Controls, MiniMap, ReactFlowProvider, Handle, Position } from "reactflow";
+import ReactFlow, { Background, Controls, MiniMap, ReactFlowProvider, Handle, Position, useStoreApi } from "reactflow";
 import htm from "htm";
 
 const html = htm.bind(React.createElement);
@@ -16,17 +16,48 @@ function fmtDate(iso) {
 function VantumNode({ data }) {
   return html`
     <div class="vnode" style=${{ borderTop: `3px solid ${data.color || "#059669"}` }}>
-      <${Handle} type="target" position=${Position.Top} />
+      <${Handle} id="in-t" type="target" position=${Position.Top} />
+      <${Handle} id="in-l" type="target" position=${Position.Left} />
       <div class="vnode-head">
         ${data.num != null && html`<span class="vnode-num" style=${{ background: data.color || "#059669" }}>${data.num}</span>`}
         <span class="vnode-title">${data.label}</span>
       </div>
       ${data.detail && html`<div class="vnode-detail">${data.detail}</div>`}
       ${data.phase && html`<div class="vnode-phase" style=${{ color: data.color || "#059669" }}>${data.phase}</div>`}
-      <${Handle} type="source" position=${Position.Bottom} />
+      <${Handle} id="out-b" type="source" position=${Position.Bottom} />
+      <${Handle} id="out-r" type="source" position=${Position.Right} />
     </div>`;
 }
 const nodeTypes = { vantum: VantumNode };
+
+/* Workaround: this build doesn't auto-measure nodes on mount, which silently
+   drops edges (no handle bounds). Force-measure nodes until bounds exist. */
+function MeasureFix({ ids }) {
+  const store = useStoreApi();
+  useEffect(() => {
+    if (!ids.length) return;
+    let tries = 0;
+    let timer = null;
+    const tick = () => {
+      const s = store.getState();
+      const updates = ids
+        .map((id) => ({
+          id,
+          nodeElement: (s.domNode || document).querySelector(`.react-flow__node[data-id="${id}"]`),
+          forceUpdate: true,
+        }))
+        .filter((u) => u.nodeElement);
+      if (updates.length) s.updateNodeDimensions(updates);
+      const first = s.nodeInternals.get(ids[0]);
+      const sym = first ? Object.getOwnPropertySymbols(first)[0] : null;
+      const measured = first && sym && first[sym] && first[sym].handleBounds;
+      if (!measured && tries++ < 12) timer = setTimeout(tick, 120);
+    };
+    timer = setTimeout(tick, 80);
+    return () => clearTimeout(timer);
+  }, [ids.join("|")]);
+  return null;
+}
 
 function stepTitle(s) {
   if (typeof s === "string") return s;
@@ -54,18 +85,30 @@ function openFileResource(r) {
 }
 
 function DetailMap({ map }) {
+  const [expanded, setExpanded] = useState(false);
+
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") setExpanded(false); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
+
   const nodes = (map && map.nodes) || [];
   const edges = (map && map.edges) || [];
   if (!nodes.length) {
     return html`<div class="detail-map"><div class="empty-canvas"><div class="muted">No map saved for this project.</div></div></div>`;
   }
   return html`
-    <div class="detail-map">
-      <${ReactFlowProvider}>
+    <div class=${"detail-map" + (expanded ? " expanded" : "")}>
+      <button class="btn-ghost btn-small map-expand" onClick=${() => setExpanded(!expanded)}>
+        ${expanded ? "✕ Close" : "⛶ Expand"}
+      </button>
+      <${ReactFlowProvider} key=${expanded ? "x" : "n"}>
         <${ReactFlow}
           nodes=${nodes} edges=${edges} nodeTypes=${nodeTypes}
           nodesDraggable=${false} nodesConnectable=${false} elementsSelectable=${false}
           fitView proOptions=${{ hideAttribution: true }}>
+          <${MeasureFix} ids=${nodes.map((n) => n.id)} />
           <${Background} color="#1B2C45" gap=${22} />
           <${Controls} showInteractive=${false} />
           <${MiniMap} style=${{ background: "#0A1626", border: "1px solid #1B2C45" }}
@@ -85,6 +128,7 @@ function Detail({ project, onBack }) {
         <button class="btn-ghost btn-small" onClick=${onBack}>← Back</button>
         <h2 style=${{ margin: 0, flex: 1 }}>${project.name}</h2>
         <span class=${"badge " + (approved ? "approved" : "active")}>${project.status || "Active"}</span>
+        <button class="btn-primary btn-small" onClick=${() => { window.location.href = "/?edit=" + project.id; }}>✎ Edit</button>
       </div>
 
       <div style=${{ display: "grid", gridTemplateColumns: "minmax(280px, 380px) 1fr", gap: "18px", alignItems: "start" }} class="detail-grid">

@@ -8,3 +8,5 @@ venv/
 
 server.out
 server.err
+
+.verify/
