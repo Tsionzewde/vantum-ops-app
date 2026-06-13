@@ -150,13 +150,13 @@ function buildFlowFromSteps(steps, projectName) {
   steps.forEach((s) => { if (s.srcId != null) bySrc[s.srcId] = s.id; });
   const hasDeps = steps.some((s) => s.deps && s.deps.length);
 
-  // ---- level (depth) per step → vertical, top to bottom ----
+  // ---- vertical level (y) = longest dependency chain into this step ----
   const levelOf = {};
   if (hasDeps) {
     const memo = {};
     const calc = (s, stack) => {
       if (memo[s.id] != null) return memo[s.id];
-      if (stack.has(s.id)) return 0; // guard against cycles
+      if (stack.has(s.id)) return 0;
       stack.add(s.id);
       let d = 0;
       (s.deps || []).forEach((dep) => {
@@ -169,25 +169,38 @@ function buildFlowFromSteps(steps, projectName) {
     };
     steps.forEach((s) => { levelOf[s.id] = calc(s, new Set()); });
   } else {
-    // no dependencies: a straight vertical chain in given order
     steps.forEach((s, i) => { levelOf[s.id] = i; });
   }
 
-  // group steps by level, spread siblings horizontally
-  const levels = {};
-  steps.forEach((s) => { (levels[levelOf[s.id]] = levels[levelOf[s.id]] || []).push(s); });
-
-  const COL_W = 260, ROW_H = 200, CENTER = 380, NODE_HALF = 110;
-  const hasRoot = !!(projectName && projectName.trim());
-  const yBase = hasRoot ? 180 : 40;
-
-  const pos = {};
-  Object.keys(levels).forEach((lvl) => {
-    const arr = levels[lvl], k = arr.length;
-    arr.forEach((s, i) => {
-      pos[s.id] = { x: CENTER + (i - (k - 1) / 2) * COL_W - NODE_HALF, y: yBase + Number(lvl) * ROW_H };
-    });
+  // ---- horizontal column (x): trunk stays centered, branches go to the side ----
+  // primary parent = first resolvable dependency; first child continues the
+  // vertical trunk, extra children peel off into their own side columns.
+  const primaryChildren = {};
+  steps.forEach((s) => {
+    const pid = (s.deps || []).map((d) => bySrc[String(d)]).find(Boolean);
+    if (pid) (primaryChildren[pid] = primaryChildren[pid] || []).push(s);
   });
+  const roots = steps.filter((s) => !(s.deps || []).map((d) => bySrc[String(d)]).some(Boolean));
+
+  const colOf = {};
+  let sideCol = 0;
+  const visit = (node, col) => {
+    if (colOf[node.id] != null) return;
+    colOf[node.id] = col;
+    (primaryChildren[node.id] || []).forEach((c, i) => {
+      if (i === 0) visit(c, col);                 // stay on the trunk (straight down)
+      else { sideCol += 1; visit(c, sideCol); }   // branch off to the side
+    });
+  };
+  (roots.length ? roots : steps.slice(0, 1)).forEach((r, i) => {
+    if (i > 0) sideCol += 1;
+    visit(r, i === 0 ? 0 : sideCol);
+  });
+  steps.forEach((s) => { if (colOf[s.id] == null) { sideCol += 1; colOf[s.id] = sideCol; } });
+
+  const COL_W = 280, ROW_H = 175, CENTER = 360, NODE_HALF = 110;
+  const hasRoot = !!(projectName && projectName.trim());
+  const yBase = hasRoot ? 170 : 40;
 
   const nodes = steps.map((s, i) => ({
     id: s.id,
@@ -199,14 +212,19 @@ function buildFlowFromSteps(steps, projectName) {
       color: colors[(s.phase || "").trim()] || "#059669",
       num: i + 1,
     },
-    position: pos[s.id],
+    position: { x: CENTER + colOf[s.id] * COL_W - NODE_HALF, y: yBase + levelOf[s.id] * ROW_H },
   }));
 
-  // all arrows flow downward: bottom of parent → top of child
-  const mkEdge = (src, tgt) => ({
-    id: `e-${src}-${tgt}`, source: src, target: tgt,
-    sourceHandle: "out-b", targetHandle: "in-t", ...EDGE_OPTS,
-  });
+  // trunk steps connect bottom→top; side branches leave from the right edge
+  const mkEdge = (src, tgt) => {
+    const side = colOf[src] !== colOf[tgt];
+    return {
+      id: `e-${src}-${tgt}`, source: src, target: tgt,
+      sourceHandle: side ? "out-r" : "out-b",
+      targetHandle: side ? "in-l" : "in-t",
+      ...EDGE_OPTS,
+    };
+  };
 
   const edges = [];
   if (hasDeps) {
@@ -218,15 +236,14 @@ function buildFlowFromSteps(steps, projectName) {
     for (let i = 0; i < steps.length - 1; i++) edges.push(mkEdge(steps[i].id, steps[i + 1].id));
   }
 
-  // root header node at the top, feeding the first-level steps
+  // floating project header at the top — NOT connected to anything
   if (hasRoot) {
     nodes.unshift({
       id: "root",
       type: "vantum",
       data: { label: projectName.trim(), root: true, color: "#C97B00" },
-      position: { x: CENTER - NODE_HALF, y: 30 },
+      position: { x: CENTER - NODE_HALF, y: 20 },
     });
-    steps.filter((s) => levelOf[s.id] === 0).forEach((s) => edges.push(mkEdge("root", s.id)));
   }
 
   return { nodes, edges };
