@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback, useEffect } from "react";
+import React, { useState, useRef, useCallback, useEffect, useContext } from "react";
 import { createRoot } from "react-dom/client";
 import ReactFlow, {
   Background,
@@ -233,6 +233,7 @@ function buildFlowFromSteps(steps, projectName) {
     nodes.unshift({
       id: "root",
       type: "vantum",
+      deletable: false,
       data: { label: projectName.trim(), root: true, color: "#C97B00" },
       position: { x: START_X + (maxCol / 2) * COL_W, y: 20 },
     });
@@ -242,19 +243,33 @@ function buildFlowFromSteps(steps, projectName) {
 }
 
 /* ---------------- custom node ---------------- */
+const NodeEditCtx = React.createContext({ editable: false, update: () => {} });
+const stop = (e) => e.stopPropagation();
+
 function VantumNode({ id, data }) {
+  const ctx = useContext(NodeEditCtx);
   const [open, setOpen] = useState(false);
+  const [editTitle, setEditTitle] = useState(false);
+  const [editDetail, setEditDetail] = useState(false);
   const updateNodeInternals = useUpdateNodeInternals();
-  useEffect(() => { updateNodeInternals(id); }, [open]);
+  useEffect(() => { updateNodeInternals(id); }, [open, editDetail, editTitle]);
 
   if (data.root) {
     return html`
       <div class="vnode vroot" style=${{ borderColor: data.color || "#C97B00" }}>
         <span class="vroot-label">PROJECT</span>
-        <span class="vroot-title">${data.label}</span>
+        ${ctx.editable && editTitle
+          ? html`<input class="vnode-edit vroot-edit nodrag" defaultValue=${data.label} autoFocus
+              onPointerDown=${stop}
+              onBlur=${(e) => { ctx.update(id, { label: e.target.value.trim() || data.label }); setEditTitle(false); }}
+              onKeyDown=${(e) => { if (e.key === "Enter") { e.preventDefault(); e.target.blur(); } if (e.key === "Escape") setEditTitle(false); }} />`
+          : html`<span class="vroot-title" onDoubleClick=${() => ctx.editable && setEditTitle(true)}>${data.label}</span>`}
         <${Handle} id="out-b" type="source" position=${Position.Bottom} />
       </div>`;
   }
+
+  const commitTitle = (e) => { ctx.update(id, { label: e.target.value.trim() || data.label }); setEditTitle(false); };
+  const commitDetail = (e) => { ctx.update(id, { detail: e.target.value }); setEditDetail(false); };
 
   return html`
     <div class="vnode" style=${{ borderTop: `3px solid ${data.color || "#059669"}` }}>
@@ -262,14 +277,24 @@ function VantumNode({ id, data }) {
       <${Handle} id="in-l" type="target" position=${Position.Left} />
       <div class="vnode-head">
         ${data.num != null && html`<span class="vnode-num" style=${{ background: data.color || "#059669" }}>${data.num}</span>`}
-        <span class="vnode-title">${data.label}</span>
+        ${ctx.editable && editTitle
+          ? html`<input class="vnode-edit nodrag" defaultValue=${data.label} autoFocus
+              onPointerDown=${stop}
+              onBlur=${commitTitle}
+              onKeyDown=${(e) => { if (e.key === "Enter") { e.preventDefault(); e.target.blur(); } if (e.key === "Escape") setEditTitle(false); }} />`
+          : html`<span class="vnode-title" title="Double-click to rename" onDoubleClick=${() => ctx.editable && setEditTitle(true)}>${data.label}</span>`}
       </div>
       ${data.phase && html`<div class="vnode-phase" style=${{ color: data.color || "#059669" }}>${data.phase}</div>`}
-      ${data.detail && html`
-        <button class="vnode-more nodrag" onPointerDown=${(e) => e.stopPropagation()} onClick=${(e) => { e.stopPropagation(); setOpen(!open); }}>
+      ${(data.detail || ctx.editable) && html`
+        <button class="vnode-more nodrag" onPointerDown=${stop} onClick=${(e) => { e.stopPropagation(); setOpen(!open); }}>
           ${open ? "Hide details ▴" : "Details ▾"}
         </button>`}
-      ${open && data.detail && html`<div class="vnode-detail">${data.detail}</div>`}
+      ${open && html`
+        ${ctx.editable && editDetail
+          ? html`<textarea class="vnode-edit-area nodrag" defaultValue=${data.detail} autoFocus
+              onPointerDown=${stop} onBlur=${commitDetail}
+              onKeyDown=${(e) => { if (e.key === "Escape") setEditDetail(false); }}></textarea>`
+          : html`<div class="vnode-detail" title=${ctx.editable ? "Double-click to edit" : ""} onDoubleClick=${() => ctx.editable && setEditDetail(true)}>${data.detail || (ctx.editable ? "Double-click to add details…" : "")}</div>`}`}
       <${Handle} id="out-b" type="source" position=${Position.Bottom} />
       <${Handle} id="out-r" type="source" position=${Position.Right} />
     </div>`;
@@ -426,6 +451,26 @@ function App() {
     setNodes((ns) => ns.filter((n) => n.id !== id));
     setEdges((es) => es.filter((e) => e.source !== id && e.target !== id));
   }
+
+  // edit a node directly on the board → keep the sidebar step in sync too
+  const updateNodeData = useCallback((nid, patch) => {
+    setNodes((ns) => ns.map((n) => (n.id === nid ? { ...n, data: { ...n.data, ...patch } } : n)));
+    if (nid === "root" && "label" in patch) { setName(patch.label); return; }
+    setSteps((arr) => arr.map((s) => {
+      if (s.id !== nid) return s;
+      const u = { ...s };
+      if ("label" in patch) u.text = patch.label;
+      if ("detail" in patch) u.detail = patch.detail;
+      return u;
+    }));
+  }, [setNodes]);
+
+  // when boxes are deleted on the board (Delete key), drop their steps too
+  const onNodesDelete = useCallback((deleted) => {
+    const ids = new Set(deleted.map((d) => d.id));
+    setSteps((arr) => arr.filter((s) => !ids.has(s.id)));
+  }, []);
+
   function rebuildMap() {
     const flow = buildFlowFromSteps(steps, name);
     setNodes(flow.nodes);
@@ -484,11 +529,16 @@ function App() {
 
   function addNode() {
     const id = newId("node");
-    setNodes((ns) => ns.concat({
-      id, type: "vantum",
-      data: { label: "New box", detail: "", phase: "", color: "#059669", num: null },
-      position: { x: 420, y: 80 + (ns.length % 6) * 80 },
-    }));
+    setSteps((arr) => [...arr, { id, srcId: id, text: "New step", detail: "", phase: "", deps: [] }]);
+    setNodes((ns) => {
+      const num = ns.filter((n) => !n.data.root).length + 1;
+      return ns.concat({
+        id, type: "vantum",
+        data: { label: "New step", detail: "", phase: "", color: "#059669", num },
+        position: { x: 420, y: 120 + (ns.length % 6) * 80 },
+      });
+    });
+    toast("Box added — double-click it to name it.");
   }
 
   /* ----- Claude: change the map ----- */
@@ -538,6 +588,7 @@ function App() {
 
   /* ---------------- render ---------------- */
   return html`
+    <${NodeEditCtx.Provider} value=${{ editable: !locked, update: updateNodeData }}>
     <div class="layout">
       <!-- LEFT -->
       <div class=${"panel left" + (panelOpen ? "" : " collapsed")}>
@@ -680,6 +731,7 @@ function App() {
             edges=${edges}
             nodeTypes=${nodeTypes}
             onNodesChange=${locked ? undefined : onNodesChange}
+            onNodesDelete=${locked ? undefined : onNodesDelete}
             onEdgesChange=${locked ? undefined : onEdgesChange}
             onConnect=${locked ? undefined : onConnect}
             onEdgeUpdate=${locked ? undefined : onEdgeUpdate}
@@ -728,6 +780,7 @@ function App() {
         </div>
       </div>
     </div>
+    <//>
   `;
 }
 
