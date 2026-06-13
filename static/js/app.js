@@ -150,9 +150,17 @@ function buildFlowFromSteps(steps, projectName) {
   steps.forEach((s) => { if (s.srcId != null) bySrc[s.srcId] = s.id; });
   const hasDeps = steps.some((s) => s.deps && s.deps.length);
 
-  // ---- vertical level (y) = longest dependency chain into this step ----
-  const levelOf = {};
-  if (hasDeps) {
+  // ---- columns (x) flow left→right; related steps stack within a column ----
+  // Group by phase when phases exist; otherwise by dependency depth.
+  const phaseOf = (s) => (s.phase || "").trim();
+  const phaseOrder = [];
+  steps.forEach((s) => { const p = phaseOf(s); if (p && !phaseOrder.includes(p)) phaseOrder.push(p); });
+  const usePhases = phaseOrder.length > 1;
+
+  const colOf = {};
+  if (usePhases) {
+    steps.forEach((s) => { colOf[s.id] = Math.max(0, phaseOrder.indexOf(phaseOf(s))); });
+  } else if (hasDeps) {
     const memo = {};
     const calc = (s, stack) => {
       if (memo[s.id] != null) return memo[s.id];
@@ -167,40 +175,24 @@ function buildFlowFromSteps(steps, projectName) {
       memo[s.id] = d;
       return d;
     };
-    steps.forEach((s) => { levelOf[s.id] = calc(s, new Set()); });
+    steps.forEach((s) => { colOf[s.id] = calc(s, new Set()); });
   } else {
-    steps.forEach((s, i) => { levelOf[s.id] = i; });
+    steps.forEach((s, i) => { colOf[s.id] = i; });
   }
 
-  // ---- horizontal column (x): trunk stays centered, branches go to the side ----
-  // primary parent = first resolvable dependency; first child continues the
-  // vertical trunk, extra children peel off into their own side columns.
-  const primaryChildren = {};
+  // row within each column = order of appearance
+  const rowCount = {};
+  const rowOf = {};
   steps.forEach((s) => {
-    const pid = (s.deps || []).map((d) => bySrc[String(d)]).find(Boolean);
-    if (pid) (primaryChildren[pid] = primaryChildren[pid] || []).push(s);
+    const c = colOf[s.id];
+    rowCount[c] = rowCount[c] || 0;
+    rowOf[s.id] = rowCount[c]++;
   });
-  const roots = steps.filter((s) => !(s.deps || []).map((d) => bySrc[String(d)]).some(Boolean));
 
-  const colOf = {};
-  let sideCol = 0;
-  const visit = (node, col) => {
-    if (colOf[node.id] != null) return;
-    colOf[node.id] = col;
-    (primaryChildren[node.id] || []).forEach((c, i) => {
-      if (i === 0) visit(c, col);                 // stay on the trunk (straight down)
-      else { sideCol += 1; visit(c, sideCol); }   // branch off to the side
-    });
-  };
-  (roots.length ? roots : steps.slice(0, 1)).forEach((r, i) => {
-    if (i > 0) sideCol += 1;
-    visit(r, i === 0 ? 0 : sideCol);
-  });
-  steps.forEach((s) => { if (colOf[s.id] == null) { sideCol += 1; colOf[s.id] = sideCol; } });
-
-  const COL_W = 280, ROW_H = 175, CENTER = 360, NODE_HALF = 110;
+  const COL_W = 290, ROW_H = 175, START_X = 60, NODE_HALF = 110;
   const hasRoot = !!(projectName && projectName.trim());
-  const yBase = hasRoot ? 170 : 40;
+  const yBase = hasRoot ? 150 : 40;
+  const maxCol = Math.max(0, ...steps.map((s) => colOf[s.id]));
 
   const nodes = steps.map((s, i) => ({
     id: s.id,
@@ -212,10 +204,10 @@ function buildFlowFromSteps(steps, projectName) {
       color: colors[(s.phase || "").trim()] || "#059669",
       num: i + 1,
     },
-    position: { x: CENTER + colOf[s.id] * COL_W - NODE_HALF, y: yBase + levelOf[s.id] * ROW_H },
+    position: { x: START_X + colOf[s.id] * COL_W, y: yBase + rowOf[s.id] * ROW_H },
   }));
 
-  // trunk steps connect bottom→top; side branches leave from the right edge
+  // same column → vertical (bottom→top); different column → sideways (right→left)
   const mkEdge = (src, tgt) => {
     const side = colOf[src] !== colOf[tgt];
     return {
@@ -236,13 +228,13 @@ function buildFlowFromSteps(steps, projectName) {
     for (let i = 0; i < steps.length - 1; i++) edges.push(mkEdge(steps[i].id, steps[i + 1].id));
   }
 
-  // floating project header at the top — NOT connected to anything
+  // floating project header centered at the top — NOT connected to anything
   if (hasRoot) {
     nodes.unshift({
       id: "root",
       type: "vantum",
       data: { label: projectName.trim(), root: true, color: "#C97B00" },
-      position: { x: CENTER - NODE_HALF, y: 20 },
+      position: { x: START_X + (maxCol / 2) * COL_W, y: 20 },
     });
   }
 
