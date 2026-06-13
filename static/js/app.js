@@ -36,10 +36,10 @@ const EXAMPLE_DESC =
 
 const PROCESS_PROMPT = (desc) =>
 `You are Vantum Ops. I have a new project.
-Extract: project name, goal, numbered steps, and resources.
-Each step needs: a short title (3-6 words), a one-line detail explaining what exactly happens in that step, and a phase that groups related steps (e.g. "Plan", "Build", "Launch", "Review").
+Extract the project name, goal, ordered steps, and resources. Reason from first principles: find the best path, blockers, and where steps run in parallel vs depend on each other.
+Each step needs: an id (s1, s2…), a short title (3-6 words), a one-line detail, a phase ("Plan", "Build", "Launch", "Review"), and depends_on (list of step ids it follows — empty for the first step). Use depends_on to show branching.
 Return ONLY JSON in this exact format, nothing else:
-{"name":"","goal":"","steps":[{"title":"","detail":"","phase":""}],"resources":[""]}
+{"name":"","goal":"","steps":[{"id":"s1","title":"","detail":"","phase":"","depends_on":[]}],"resources":[""]}
 My project: ${desc}`;
 
 const CHANGE_PROMPT = (state, change) =>
@@ -48,8 +48,8 @@ ${JSON.stringify(state, null, 2)}
 
 Requested change: ${change}
 
-Apply the change and return ONLY the full updated project as JSON in this exact format, nothing else:
-{"name":"","goal":"","steps":[{"title":"","detail":"","phase":""}],"resources":[""]}`;
+Apply the change and return ONLY the full updated project as JSON in this exact format, nothing else. Keep ids stable and use depends_on (list of step ids) to show branching:
+{"name":"","goal":"","steps":[{"id":"s1","title":"","detail":"","phase":"","depends_on":[]}],"resources":[""]}`;
 
 /* ---------------- helpers ---------------- */
 let toastEl = null;
@@ -116,12 +116,14 @@ let SEQ = 0;
 const newId = (p) => `${p}-${Math.random().toString(36).slice(2, 7)}-${SEQ++}`;
 
 function normalizeStep(s, i) {
-  if (typeof s === "string") return { id: newId("step"), text: s, detail: "", phase: "" };
+  if (typeof s === "string") return { id: newId("step"), srcId: String(i + 1), text: s, detail: "", phase: "", deps: [] };
   return {
     id: newId("step"),
+    srcId: s && s.id != null ? String(s.id) : String(i + 1),
     text: (s && (s.title || s.step || s.text || s.name)) || `Step ${i + 1}`,
     detail: (s && (s.detail || s.description)) || "",
     phase: (s && s.phase) || "",
+    deps: Array.isArray(s && s.depends_on) ? s.depends_on.map(String) : [],
   };
 }
 
@@ -143,25 +145,46 @@ function phaseColorMap(steps) {
 
 function buildFlowFromSteps(steps) {
   const colors = phaseColorMap(steps);
+  const bySrc = {};
+  steps.forEach((s) => { if (s.srcId != null) bySrc[s.srcId] = s.id; });
+  const hasDeps = steps.some((s) => s.deps && s.deps.length);
 
-  // Branch layout: one column per phase; steps flow down a column and
-  // branch sideways into the next phase. Without phases, wrap every 4.
-  const phaseOf = (s) => (s.phase || "").trim() || "__none__";
-  const phaseOrder = [];
-  steps.forEach((s) => { const p = phaseOf(s); if (!phaseOrder.includes(p)) phaseOrder.push(p); });
-
-  let columns;
-  if (phaseOrder.length > 1) {
-    columns = phaseOrder.map((p) => steps.filter((s) => phaseOf(s) === p));
+  // ---- column (x) per step ----
+  const colOf = {};
+  if (hasDeps) {
+    // column = longest dependency chain leading into this step (its "depth")
+    const memo = {};
+    const calc = (s, stack) => {
+      if (memo[s.id] != null) return memo[s.id];
+      if (stack.has(s.id)) return 0; // guard against cycles
+      stack.add(s.id);
+      let d = 0;
+      (s.deps || []).forEach((dep) => {
+        const parent = steps.find((x) => x.id === bySrc[String(dep)]);
+        if (parent) d = Math.max(d, calc(parent, stack) + 1);
+      });
+      stack.delete(s.id);
+      memo[s.id] = d;
+      return d;
+    };
+    steps.forEach((s) => { colOf[s.id] = calc(s, new Set()); });
   } else {
-    columns = [];
-    for (let i = 0; i < steps.length; i += 4) columns.push(steps.slice(i, i + 4));
+    // no dependencies: column per phase, else wrap every 4
+    const phaseOf = (s) => (s.phase || "").trim() || "__none__";
+    const order = [];
+    steps.forEach((s) => { const p = phaseOf(s); if (!order.includes(p)) order.push(p); });
+    if (order.length > 1) steps.forEach((s) => { colOf[s.id] = order.indexOf(phaseOf(s)); });
+    else steps.forEach((s, i) => { colOf[s.id] = Math.floor(i / 4); });
   }
 
-  const place = {};
-  columns.forEach((col, ci) => col.forEach((s, ri) => {
-    place[s.id] = { x: 60 + ci * 300, y: 50 + ri * 175, col: ci };
-  }));
+  // ---- row (y) within each column ----
+  const rowCount = {};
+  const rowOf = {};
+  steps.forEach((s) => {
+    const c = colOf[s.id];
+    rowCount[c] = rowCount[c] || 0;
+    rowOf[s.id] = rowCount[c]++;
+  });
 
   const nodes = steps.map((s, i) => ({
     id: s.id,
@@ -173,20 +196,28 @@ function buildFlowFromSteps(steps) {
       color: colors[(s.phase || "").trim()] || "#059669",
       num: i + 1,
     },
-    position: { x: place[s.id].x, y: place[s.id].y },
+    position: { x: 60 + colOf[s.id] * 300, y: 50 + rowOf[s.id] * 175 },
   }));
 
-  const edges = [];
-  for (let i = 0; i < steps.length - 1; i++) {
-    const a = steps[i], b = steps[i + 1];
-    const sameCol = place[a.id].col === place[b.id].col;
-    edges.push({
-      id: `e-${a.id}-${b.id}`,
-      source: a.id, target: b.id,
+  const mkEdge = (src, tgt) => {
+    const sameCol = colOf[src] === colOf[tgt];
+    return {
+      id: `e-${src}-${tgt}`, source: src, target: tgt,
       sourceHandle: sameCol ? "out-b" : "out-r",
       targetHandle: sameCol ? "in-t" : "in-l",
       ...EDGE_OPTS,
-    });
+    };
+  };
+
+  const edges = [];
+  if (hasDeps) {
+    // draw an arrow for every dependency → real branching
+    steps.forEach((s) => (s.deps || []).forEach((dep) => {
+      const src = bySrc[String(dep)];
+      if (src) edges.push(mkEdge(src, s.id));
+    }));
+  } else {
+    for (let i = 0; i < steps.length - 1; i++) edges.push(mkEdge(steps[i].id, steps[i + 1].id));
   }
   return { nodes, edges };
 }
@@ -429,7 +460,7 @@ function App() {
     if (!changeText.trim()) { toast("Type what you'd like Claude to change."); return; }
     const state = {
       name, goal,
-      steps: steps.map((s) => ({ title: s.text, detail: s.detail, phase: s.phase })),
+      steps: steps.map((s) => ({ id: s.srcId || s.id, title: s.text, detail: s.detail, phase: s.phase, depends_on: s.deps || [] })),
       resources: resources.map((r) => (r.kind === "file" ? r.name + " (uploaded file)" : r.value)),
       map: {
         nodes: nodes.map((n) => ({ id: n.id, label: n.data.label, position: n.position })),
@@ -445,7 +476,7 @@ function App() {
     setSaving(true);
     const payload = {
       name, goal,
-      steps: steps.map((s) => ({ title: s.text, detail: s.detail, phase: s.phase })),
+      steps: steps.map((s) => ({ id: s.srcId || s.id, title: s.text, detail: s.detail, phase: s.phase, depends_on: s.deps || [] })),
       resources,
       map_data: { nodes, edges },
       status: "Approved",
