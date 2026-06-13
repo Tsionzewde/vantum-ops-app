@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { createRoot } from "react-dom/client";
-import ReactFlow, { Background, Controls, MiniMap, ReactFlowProvider, Handle, Position, useStoreApi } from "reactflow";
+import ReactFlow, { Background, Controls, MiniMap, ReactFlowProvider, Handle, Position, useStoreApi, useUpdateNodeInternals } from "reactflow";
 import htm from "htm";
 
 const html = htm.bind(React.createElement);
@@ -13,7 +13,20 @@ function fmtDate(iso) {
 }
 
 /* same rich node as the builder so saved maps render identically */
-function VantumNode({ data }) {
+function VantumNode({ id, data }) {
+  const [open, setOpen] = useState(false);
+  const updateNodeInternals = useUpdateNodeInternals();
+  useEffect(() => { updateNodeInternals(id); }, [open]);
+
+  if (data.root) {
+    return html`
+      <div class="vnode vroot" style=${{ borderColor: data.color || "#C97B00" }}>
+        <span class="vroot-label">PROJECT</span>
+        <span class="vroot-title">${data.label}</span>
+        <${Handle} id="out-b" type="source" position=${Position.Bottom} />
+      </div>`;
+  }
+
   return html`
     <div class="vnode" style=${{ borderTop: `3px solid ${data.color || "#059669"}` }}>
       <${Handle} id="in-t" type="target" position=${Position.Top} />
@@ -22,8 +35,12 @@ function VantumNode({ data }) {
         ${data.num != null && html`<span class="vnode-num" style=${{ background: data.color || "#059669" }}>${data.num}</span>`}
         <span class="vnode-title">${data.label}</span>
       </div>
-      ${data.detail && html`<div class="vnode-detail">${data.detail}</div>`}
       ${data.phase && html`<div class="vnode-phase" style=${{ color: data.color || "#059669" }}>${data.phase}</div>`}
+      ${data.detail && html`
+        <button class="vnode-more nodrag" onPointerDown=${(e) => e.stopPropagation()} onClick=${(e) => { e.stopPropagation(); setOpen(!open); }}>
+          ${open ? "Hide details ▴" : "Details ▾"}
+        </button>`}
+      ${open && data.detail && html`<div class="vnode-detail">${data.detail}</div>`}
       <${Handle} id="out-b" type="source" position=${Position.Bottom} />
       <${Handle} id="out-r" type="source" position=${Position.Right} />
     </div>`;

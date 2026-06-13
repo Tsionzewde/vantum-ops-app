@@ -13,6 +13,7 @@ import ReactFlow, {
   Handle,
   Position,
   useStoreApi,
+  useUpdateNodeInternals,
 } from "reactflow";
 import htm from "htm";
 
@@ -22,7 +23,7 @@ const html = htm.bind(React.createElement);
 const PHASE_COLORS = ["#059669", "#C97B00", "#3B82F6", "#A855F7", "#14B8A6", "#E0527A"];
 
 const EDGE_OPTS = {
-  animated: true,
+  animated: false,
   style: { stroke: "#059669", strokeWidth: 2 },
   markerEnd: { type: MarkerType.ArrowClosed, color: "#059669" },
 };
@@ -143,16 +144,15 @@ function phaseColorMap(steps) {
   return map;
 }
 
-function buildFlowFromSteps(steps) {
+function buildFlowFromSteps(steps, projectName) {
   const colors = phaseColorMap(steps);
   const bySrc = {};
   steps.forEach((s) => { if (s.srcId != null) bySrc[s.srcId] = s.id; });
   const hasDeps = steps.some((s) => s.deps && s.deps.length);
 
-  // ---- column (x) per step ----
-  const colOf = {};
+  // ---- level (depth) per step → vertical, top to bottom ----
+  const levelOf = {};
   if (hasDeps) {
-    // column = longest dependency chain leading into this step (its "depth")
     const memo = {};
     const calc = (s, stack) => {
       if (memo[s.id] != null) return memo[s.id];
@@ -167,23 +167,26 @@ function buildFlowFromSteps(steps) {
       memo[s.id] = d;
       return d;
     };
-    steps.forEach((s) => { colOf[s.id] = calc(s, new Set()); });
+    steps.forEach((s) => { levelOf[s.id] = calc(s, new Set()); });
   } else {
-    // no dependencies: column per phase, else wrap every 4
-    const phaseOf = (s) => (s.phase || "").trim() || "__none__";
-    const order = [];
-    steps.forEach((s) => { const p = phaseOf(s); if (!order.includes(p)) order.push(p); });
-    if (order.length > 1) steps.forEach((s) => { colOf[s.id] = order.indexOf(phaseOf(s)); });
-    else steps.forEach((s, i) => { colOf[s.id] = Math.floor(i / 4); });
+    // no dependencies: a straight vertical chain in given order
+    steps.forEach((s, i) => { levelOf[s.id] = i; });
   }
 
-  // ---- row (y) within each column ----
-  const rowCount = {};
-  const rowOf = {};
-  steps.forEach((s) => {
-    const c = colOf[s.id];
-    rowCount[c] = rowCount[c] || 0;
-    rowOf[s.id] = rowCount[c]++;
+  // group steps by level, spread siblings horizontally
+  const levels = {};
+  steps.forEach((s) => { (levels[levelOf[s.id]] = levels[levelOf[s.id]] || []).push(s); });
+
+  const COL_W = 260, ROW_H = 200, CENTER = 380, NODE_HALF = 110;
+  const hasRoot = !!(projectName && projectName.trim());
+  const yBase = hasRoot ? 180 : 40;
+
+  const pos = {};
+  Object.keys(levels).forEach((lvl) => {
+    const arr = levels[lvl], k = arr.length;
+    arr.forEach((s, i) => {
+      pos[s.id] = { x: CENTER + (i - (k - 1) / 2) * COL_W - NODE_HALF, y: yBase + Number(lvl) * ROW_H };
+    });
   });
 
   const nodes = steps.map((s, i) => ({
@@ -196,22 +199,17 @@ function buildFlowFromSteps(steps) {
       color: colors[(s.phase || "").trim()] || "#059669",
       num: i + 1,
     },
-    position: { x: 60 + colOf[s.id] * 300, y: 50 + rowOf[s.id] * 175 },
+    position: pos[s.id],
   }));
 
-  const mkEdge = (src, tgt) => {
-    const sameCol = colOf[src] === colOf[tgt];
-    return {
-      id: `e-${src}-${tgt}`, source: src, target: tgt,
-      sourceHandle: sameCol ? "out-b" : "out-r",
-      targetHandle: sameCol ? "in-t" : "in-l",
-      ...EDGE_OPTS,
-    };
-  };
+  // all arrows flow downward: bottom of parent → top of child
+  const mkEdge = (src, tgt) => ({
+    id: `e-${src}-${tgt}`, source: src, target: tgt,
+    sourceHandle: "out-b", targetHandle: "in-t", ...EDGE_OPTS,
+  });
 
   const edges = [];
   if (hasDeps) {
-    // draw an arrow for every dependency → real branching
     steps.forEach((s) => (s.deps || []).forEach((dep) => {
       const src = bySrc[String(dep)];
       if (src) edges.push(mkEdge(src, s.id));
@@ -219,11 +217,36 @@ function buildFlowFromSteps(steps) {
   } else {
     for (let i = 0; i < steps.length - 1; i++) edges.push(mkEdge(steps[i].id, steps[i + 1].id));
   }
+
+  // root header node at the top, feeding the first-level steps
+  if (hasRoot) {
+    nodes.unshift({
+      id: "root",
+      type: "vantum",
+      data: { label: projectName.trim(), root: true, color: "#C97B00" },
+      position: { x: CENTER - NODE_HALF, y: 30 },
+    });
+    steps.filter((s) => levelOf[s.id] === 0).forEach((s) => edges.push(mkEdge("root", s.id)));
+  }
+
   return { nodes, edges };
 }
 
 /* ---------------- custom node ---------------- */
-function VantumNode({ data }) {
+function VantumNode({ id, data }) {
+  const [open, setOpen] = useState(false);
+  const updateNodeInternals = useUpdateNodeInternals();
+  useEffect(() => { updateNodeInternals(id); }, [open]);
+
+  if (data.root) {
+    return html`
+      <div class="vnode vroot" style=${{ borderColor: data.color || "#C97B00" }}>
+        <span class="vroot-label">PROJECT</span>
+        <span class="vroot-title">${data.label}</span>
+        <${Handle} id="out-b" type="source" position=${Position.Bottom} />
+      </div>`;
+  }
+
   return html`
     <div class="vnode" style=${{ borderTop: `3px solid ${data.color || "#059669"}` }}>
       <${Handle} id="in-t" type="target" position=${Position.Top} />
@@ -232,8 +255,12 @@ function VantumNode({ data }) {
         ${data.num != null && html`<span class="vnode-num" style=${{ background: data.color || "#059669" }}>${data.num}</span>`}
         <span class="vnode-title">${data.label}</span>
       </div>
-      ${data.detail && html`<div class="vnode-detail">${data.detail}</div>`}
       ${data.phase && html`<div class="vnode-phase" style=${{ color: data.color || "#059669" }}>${data.phase}</div>`}
+      ${data.detail && html`
+        <button class="vnode-more nodrag" onPointerDown=${(e) => e.stopPropagation()} onClick=${(e) => { e.stopPropagation(); setOpen(!open); }}>
+          ${open ? "Hide details ▴" : "Details ▾"}
+        </button>`}
+      ${open && data.detail && html`<div class="vnode-detail">${data.detail}</div>`}
       <${Handle} id="out-b" type="source" position=${Position.Bottom} />
       <${Handle} id="out-r" type="source" position=${Position.Right} />
     </div>`;
@@ -316,7 +343,7 @@ function App() {
           setNodes(savedNodes);
           setEdges((p.map_data && p.map_data.edges) || []);
         } else {
-          const flow = buildFlowFromSteps(ns);
+          const flow = buildFlowFromSteps(ns, p.name);
           setNodes(flow.nodes);
           setEdges(flow.edges);
         }
@@ -348,7 +375,7 @@ function App() {
     const newSteps = (Array.isArray(data.steps) ? data.steps : []).map(normalizeStep);
     setSteps(newSteps);
     setResources((Array.isArray(data.resources) ? data.resources : []).map(normalizeResource));
-    const flow = buildFlowFromSteps(newSteps);
+    const flow = buildFlowFromSteps(newSteps, data.name);
     setNodes(flow.nodes);
     setEdges(flow.edges);
     setStatus("Active");
@@ -391,7 +418,7 @@ function App() {
     setEdges((es) => es.filter((e) => e.source !== id && e.target !== id));
   }
   function rebuildMap() {
-    const flow = buildFlowFromSteps(steps);
+    const flow = buildFlowFromSteps(steps, name);
     setNodes(flow.nodes);
     setEdges(flow.edges);
     toast("Map rebuilt from the written steps.");
