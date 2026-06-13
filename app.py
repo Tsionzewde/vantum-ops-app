@@ -12,6 +12,14 @@ from datetime import datetime, timezone
 from flask import Flask, render_template, request, jsonify
 from dotenv import load_dotenv
 
+# Use the OS certificate store for TLS (handles machines where antivirus/VPN
+# intercepts HTTPS and the default bundle doesn't trust it). No-op if missing.
+try:
+    import truststore
+    truststore.inject_into_ssl()
+except Exception:
+    pass
+
 load_dotenv()
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
