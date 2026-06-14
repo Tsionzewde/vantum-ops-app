@@ -25,6 +25,7 @@
       <span class="subtitle">Project &amp; Process Tracker</span>
     </div>
     <div class="nav-links">
+      <button id="themeToggle" class="theme-toggle" title="Toggle light / dark">🌙</button>
       <a href="/">Builder</a>
       <a href="/archive" class="active">Archive</a>
     </div>
@@ -32,6 +33,7 @@
 
   <div id="root"></div>
 
+  <script src="{{ url_for('static', filename='js/theme.js') }}"></script>
   <script type="module" src="{{ url_for('static', filename='js/archive.js') }}"></script>
 </body>
 </html>

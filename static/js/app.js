@@ -589,7 +589,7 @@ function App() {
   /* ---------------- render ---------------- */
   return html`
     <${NodeEditCtx.Provider} value=${{ editable: !locked, update: updateNodeData }}>
-    <div class="layout">
+    <div class=${"layout" + (hasContent ? "" : " no-canvas")}>
       <!-- LEFT -->
       <div class=${"panel left" + (panelOpen ? "" : " collapsed")}>
         <div class="card">

@@ -578,3 +578,65 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   .panel.left { width: 100%; min-width: 0; }
   .panel.right { height: 70vh; }
 }
+
+/* ---------- landing: input only, no canvas ---------- */
+.layout.no-canvas { justify-content: center; }
+.layout.no-canvas .panel.right { display: none; }
+.layout.no-canvas .panel.left {
+  width: 100%;
+  min-width: 0;
+  max-width: 720px;
+  margin: 0 auto;
+  border-right: none;
+  padding-top: 40px;
+}
+
+/* ---------- theme toggle ---------- */
+.theme-toggle {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  font-size: 15px;
+  line-height: 1;
+  display: inline-grid;
+  place-items: center;
+}
+.theme-toggle:hover { border-color: var(--green); }
+
+/* ---------- light theme (targeted overrides; dark stays default) ---------- */
+body[data-theme="light"] {
+  --bg: #EEF2F7;
+  --panel: #FFFFFF;
+  --panel-2: #FFFFFF;
+  --border: #D4DEEA;
+  --border-soft: #E6ECF4;
+  --text: #0B1626;
+  --muted: #44566D;
+  --muted-2: #7C8CA1;
+}
+body[data-theme="light"] .topbar { background: rgba(255,255,255,0.85); }
+body[data-theme="light"] .brand-row h1,
+body[data-theme="light"] .field input,
+body[data-theme="light"] .field select,
+body[data-theme="light"] .field textarea,
+body[data-theme="light"] .search input,
+body[data-theme="light"] .flow-bar input,
+body[data-theme="light"] .vnode,
+body[data-theme="light"] .vnode-title,
+body[data-theme="light"] .vroot-title,
+body[data-theme="light"] .res-name,
+body[data-theme="light"] .vnode-edit,
+body[data-theme="light"] .proj-card h3,
+body[data-theme="light"] .modal h2 { color: var(--text); }
+body[data-theme="light"] .vnode { background: #FFFFFF; }
+body[data-theme="light"] .chip:hover,
+body[data-theme="light"] .chip.active,
+body[data-theme="light"] .btn-ghost:hover,
+body[data-theme="light"] .btn-outline:hover,
+body[data-theme="light"] .nav-links a:hover,
+body[data-theme="light"] .nav-links a.active { color: var(--text); }
+body[data-theme="light"] .react-flow__controls button { color: #0B1626; fill: #0B1626; }
+body[data-theme="light"] .react-flow__minimap { background: #FFFFFF !important; }
