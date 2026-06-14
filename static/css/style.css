@@ -640,3 +640,24 @@ body[data-theme="light"] .nav-links a:hover,
 body[data-theme="light"] .nav-links a.active { color: var(--text); }
 body[data-theme="light"] .react-flow__controls button { color: #0B1626; fill: #0B1626; }
 body[data-theme="light"] .react-flow__minimap { background: #FFFFFF !important; }
+
+/* ---------- 3-mode input funnel ---------- */
+.new-title { font-size: 18px; font-weight: 700; margin: 2px 0 14px; }
+.modes { display: flex; gap: 6px; margin-bottom: 16px; }
+.modes .mode {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  padding: 9px 8px;
+  border-radius: 10px;
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.modes .mode:hover:not(:disabled) { border-color: var(--green); color: var(--text); }
+.modes .mode.on {
+  background: var(--green-soft);
+  border-color: var(--green);
+  color: var(--text);
+}

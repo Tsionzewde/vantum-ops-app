@@ -35,13 +35,38 @@ const EXAMPLE_DESC =
   "Goal: collect 300 emails in 30 days. I'll write the guide in Google Docs, design it in Canva, " +
   "build a landing page in Carrd, hook up Mailchimp to deliver it, and promote it on LinkedIn for two weeks.";
 
-const PROCESS_PROMPT = (desc) =>
-`You are Vantum Ops. I have a new project.
-Extract the project name, goal, ordered steps, and resources. Reason from first principles: find the best path, blockers, and where steps run in parallel vs depend on each other.
-Each step needs: an id (s1, s2…), a short title (3-6 words), a one-line detail, a phase ("Plan", "Build", "Launch", "Review"), and depends_on (list of step ids it follows — empty for the first step). Use depends_on to show branching.
-Return ONLY JSON in this exact format, nothing else:
-{"name":"","goal":"","steps":[{"id":"s1","title":"","detail":"","phase":"","depends_on":[]}],"resources":[""]}
-My project: ${desc}`;
+const SCHEMA = `{"name":"","goal":"","steps":[{"id":"s1","title":"","detail":"","phase":"","depends_on":[]}],"resources":[""]}`;
+const SCHEMA_RULES = `Each step has an id (s1, s2…), a short title (3-6 words), a one-line detail, a phase (e.g. "Plan", "Build", "Launch", "Review"), and depends_on (list of step ids it follows — empty for the first). Use depends_on to show branching.`;
+
+// ① Idea → deep-reasoned plan
+const IDEA_PROMPT = (idea) =>
+`You are Vantum Ops. I'm planning a new project. My idea:
+${idea}
+
+Think from first principles and work out the BEST way to do this — the logical order of operations, which steps run in parallel vs depend on each other, likely blockers, and a better path if one exists. Group steps into phases.
+${SCHEMA_RULES}
+Return ONLY this JSON, nothing else:
+${SCHEMA}`;
+
+// ② From a call → pull my assigned task from Fathom
+const CALL_PROMPT = (ref) =>
+`You are Vantum Ops. Using my connected Fathom, pull ${ref && ref.trim() ? ref.trim() : "my most recent meeting"} that I (Tsion) attended.
+Several people talk in it; find the task that was assigned to ME — what I'm responsible for building.
+1. First tell me the task/project you found and confirm it's the right one. Wait for my yes.
+2. Then ask up to 5 clarifying questions about anything missing or ambiguous. Wait for my answers.
+3. Then combine the transcript + my answers, reason the best path from first principles (order, blockers, parallel vs dependent steps), and output ONLY this JSON, nothing else:
+${SCHEMA}
+${SCHEMA_RULES}`;
+
+// ③ Finished project → reverse-engineer for documentation
+const REVERSE_PROMPT = (desc) =>
+`You are Vantum Ops. I already built this project:
+${desc}
+
+Reverse-engineer the step-by-step process I most likely followed, so it's documented for the team to understand and reuse. Infer phases, order, dependencies, and the tools/resources likely used.
+${SCHEMA_RULES}
+Return ONLY this JSON, nothing else:
+${SCHEMA}`;
 
 const CHANGE_PROMPT = (state, change) =>
 `You are Vantum Ops. Here is my current project process map as JSON:
@@ -332,7 +357,10 @@ function MeasureFix({ ids }) {
 
 /* ---------------- App ---------------- */
 function App() {
+  const [inputMode, setInputMode] = useState("idea"); // idea | call | finished
   const [desc, setDesc] = useState("");
+  const [callRef, setCallRef] = useState("");
+  const [finishedDesc, setFinishedDesc] = useState("");
   const [guideOpen, setGuideOpen] = useState(false);
   const [pasteOpen, setPasteOpen] = useState(false);
   const [rawJson, setRawJson] = useState("");
@@ -390,9 +418,16 @@ function App() {
   }, []);
 
   /* ----- Claude: process description ----- */
-  function processWithClaude() {
-    if (!desc.trim()) { toast("Describe your project first — open the guide if you're unsure."); return; }
-    openClaude(PROCESS_PROMPT(desc.trim()));
+  function startWithClaude() {
+    if (inputMode === "idea") {
+      if (!desc.trim()) { toast("Describe your idea first — open the guide if unsure."); return; }
+      openClaude(IDEA_PROMPT(desc.trim()));
+    } else if (inputMode === "call") {
+      openClaude(CALL_PROMPT(callRef));
+    } else {
+      if (!finishedDesc.trim()) { toast("Describe the finished project first."); return; }
+      openClaude(REVERSE_PROMPT(finishedDesc.trim()));
+    }
   }
 
   /* ----- apply pasted JSON ----- */
@@ -593,38 +628,60 @@ function App() {
       <!-- LEFT -->
       <div class=${"panel left" + (panelOpen ? "" : " collapsed")}>
         <div class="card">
-          <div class="field">
-            <label>Describe your project</label>
-            <textarea
-              placeholder="Describe your project... what it is, the goal, the main steps, and the tools you'll use."
-              value=${desc}
-              disabled=${locked}
-              onInput=${(e) => setDesc(e.target.value)}
-              rows="4"></textarea>
+          ${!hasContent && html`<div class="new-title">Start a new project</div>`}
+          <div class="modes">
+            <button class=${"mode" + (inputMode === "idea" ? " on" : "")} disabled=${locked} onClick=${() => setInputMode("idea")}>💡 Idea</button>
+            <button class=${"mode" + (inputMode === "call" ? " on" : "")} disabled=${locked} onClick=${() => setInputMode("call")}>🎙️ From a call</button>
+            <button class=${"mode" + (inputMode === "finished" ? " on" : "")} disabled=${locked} onClick=${() => setInputMode("finished")}>📦 Finished project</button>
           </div>
 
-          <div class="guide ${guideOpen ? "open" : ""}">
-            <button type="button" class="guide-toggle" onClick=${() => setGuideOpen(!guideOpen)}>
-              💡 How to describe your project ${guideOpen ? "▴" : "▾"}
-            </button>
-            ${guideOpen && html`
-              <div class="guide-body">
-                <div class="muted" style=${{ marginBottom: "8px" }}>The more of these you include, the better the breakdown:</div>
-                <ul>
-                  <li><strong>What it is</strong> — “a lead magnet PDF”, “a 5-email welcome sequence”…</li>
-                  <li><strong>The goal, with a number</strong> — “collect 300 emails in 30 days”</li>
-                  <li><strong>The main actions in order</strong> — write → design → build page → connect email → promote</li>
-                  <li><strong>Tools you'll use</strong> — Canva, Mailchimp, Carrd, LinkedIn…</li>
-                  <li><strong>Timeline or deadline</strong> — “launch in two weeks”</li>
-                </ul>
-                <button type="button" class="btn-ghost btn-small" onClick=${() => { setDesc(EXAMPLE_DESC); setGuideOpen(false); }}>Insert example</button>
-              </div>`}
-          </div>
+          ${inputMode === "idea" && html`
+            <div class="field">
+              <label>Describe your idea <span class="hint">— Claude researches the best path</span></label>
+              <textarea rows="4" disabled=${locked} value=${desc} onInput=${(e) => setDesc(e.target.value)}
+                placeholder="What do you want to build? Goal, context, and any tools you'll use."></textarea>
+            </div>
+            <div class="guide">
+              <button type="button" class="guide-toggle" onClick=${() => setGuideOpen(!guideOpen)}>💡 How to describe it ${guideOpen ? "▴" : "▾"}</button>
+              ${guideOpen && html`
+                <div class="guide-body">
+                  <div class="muted" style=${{ marginBottom: "8px" }}>The more of these you include, the better the path:</div>
+                  <ul>
+                    <li><strong>What it is</strong> — “a lead magnet PDF”, “a 5-email sequence”…</li>
+                    <li><strong>The goal, with a number</strong> — “collect 300 emails in 30 days”</li>
+                    <li><strong>Tools</strong> — Canva, Mailchimp, Carrd…</li>
+                    <li><strong>Timeline</strong> — “launch in two weeks”</li>
+                  </ul>
+                  <button type="button" class="btn-ghost btn-small" onClick=${() => { setDesc(EXAMPLE_DESC); setGuideOpen(false); }}>Insert example</button>
+                </div>`}
+            </div>
+            <div class="row" style=${{ marginTop: "12px" }}>
+              <button class="btn-primary" disabled=${locked} onClick=${startWithClaude}>Research with Claude</button>
+              <button class="btn-ghost" disabled=${locked} onClick=${() => setPasteOpen(true)}>Paste Claude Output</button>
+            </div>`}
 
-          <div class="row" style=${{ marginTop: "12px" }}>
-            <button class="btn-primary" disabled=${locked} onClick=${processWithClaude}>Process with Claude</button>
-            <button class="btn-ghost" disabled=${locked} onClick=${() => setPasteOpen(true)}>Paste Claude Output</button>
-          </div>
+          ${inputMode === "call" && html`
+            <div class="field">
+              <label>Which call? <span class="hint">— date or keywords (optional)</span></label>
+              <input disabled=${locked} value=${callRef} onInput=${(e) => setCallRef(e.target.value)}
+                placeholder="e.g. my June 6 call about the lead magnet" />
+            </div>
+            <div class="muted" style=${{ marginBottom: "4px" }}>Pulls your assigned task from Fathom. Requires Fathom connected in your Claude account.</div>
+            <div class="row" style=${{ marginTop: "12px" }}>
+              <button class="btn-primary" disabled=${locked} onClick=${startWithClaude}>Pull from the call</button>
+              <button class="btn-ghost" disabled=${locked} onClick=${() => setPasteOpen(true)}>Paste Claude Output</button>
+            </div>`}
+
+          ${inputMode === "finished" && html`
+            <div class="field">
+              <label>Describe the finished project <span class="hint">— Claude reverse-engineers the steps</span></label>
+              <textarea rows="4" disabled=${locked} value=${finishedDesc} onInput=${(e) => setFinishedDesc(e.target.value)}
+                placeholder="What did you already build? Paste a link or describe it, so it gets documented."></textarea>
+            </div>
+            <div class="row" style=${{ marginTop: "12px" }}>
+              <button class="btn-primary" disabled=${locked} onClick=${startWithClaude}>Reverse-engineer with Claude</button>
+              <button class="btn-ghost" disabled=${locked} onClick=${() => setPasteOpen(true)}>Paste Claude Output</button>
+            </div>`}
         </div>
 
         ${hasContent && html`
