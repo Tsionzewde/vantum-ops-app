@@ -38,15 +38,16 @@ const EXAMPLE_DESC =
 const SCHEMA = `{"name":"","goal":"","steps":[{"id":"s1","title":"","detail":"","phase":"","depends_on":[]}],"resources":[""]}`;
 const SCHEMA_RULES = `Each step has an id (s1, s2…), a short title (3-6 words), a one-line detail, a phase (e.g. "Plan", "Build", "Launch", "Review"), and depends_on (list of step ids it follows — empty for the first). Use depends_on to show branching.`;
 
-// ① Idea → deep-reasoned plan
+// ① Idea → confirm, ask questions, then deep-reasoned plan
 const IDEA_PROMPT = (idea) =>
 `You are Vantum Ops. I'm planning a new project. My idea:
 ${idea}
 
-Think from first principles and work out the BEST way to do this — the logical order of operations, which steps run in parallel vs depend on each other, likely blockers, and a better path if one exists. Group steps into phases.
-${SCHEMA_RULES}
-Return ONLY this JSON, nothing else:
-${SCHEMA}`;
+1. First, briefly say back your understanding of what I'm building and confirm it's right. Wait for my yes.
+2. Then ask me up to 5 clarifying questions to fill the gaps (goal/number, constraints, tools, deadline, what "done" means). Wait for my answers.
+3. Then think from first principles and work out the BEST path — logical order, which steps are parallel vs dependent, likely blockers, and a better way if one exists — and output ONLY this JSON, nothing else:
+${SCHEMA}
+${SCHEMA_RULES}`;
 
 // ② From a call → pull my assigned task from Fathom
 const CALL_PROMPT = (ref) =>
@@ -58,12 +59,12 @@ Several people talk in it; find the task that was assigned to ME — what I'm re
 ${SCHEMA}
 ${SCHEMA_RULES}`;
 
-// ③ Finished project → reverse-engineer for documentation
+// ③ Finished project → reverse-engineer with minimal input (zero admin)
 const REVERSE_PROMPT = (desc) =>
-`You are Vantum Ops. I already built this project:
+`You are Vantum Ops. I already finished this project — here's what it is (a link, or a short note, is enough):
 ${desc}
 
-Reverse-engineer the step-by-step process I most likely followed, so it's documented for the team to understand and reuse. Infer phases, order, dependencies, and the tools/resources likely used.
+Do the work for me. If I gave a link, infer from it; otherwise infer from the note. Reverse-engineer the step-by-step process I most likely followed, so it's documented for the team to understand and reuse. Only ask a question if something essential is missing — otherwise just produce it. Infer phases, order, dependencies, and the tools/resources likely used.
 ${SCHEMA_RULES}
 Return ONLY this JSON, nothing else:
 ${SCHEMA}`;
@@ -324,7 +325,22 @@ function VantumNode({ id, data }) {
       <${Handle} id="out-r" type="source" position=${Position.Right} />
     </div>`;
 }
-const nodeTypes = { vantum: VantumNode };
+// free-floating sticky note for ideation (not a step)
+function NoteNode({ id, data }) {
+  const ctx = useContext(NodeEditCtx);
+  const [edit, setEdit] = useState(false);
+  return html`
+    <div class="note">
+      ${ctx.editable && edit
+        ? html`<textarea class="note-edit nodrag" defaultValue=${data.text} autoFocus
+            onPointerDown=${stop}
+            onBlur=${(e) => { ctx.update(id, { text: e.target.value }); setEdit(false); }}
+            onKeyDown=${(e) => { if (e.key === "Escape") setEdit(false); }}></textarea>`
+        : html`<div class="note-text" onDoubleClick=${() => ctx.editable && setEdit(true)}>${data.text || (ctx.editable ? "Double-click to write…" : "")}</div>`}
+    </div>`;
+}
+
+const nodeTypes = { vantum: VantumNode, note: NoteNode };
 
 /* Workaround: this build doesn't auto-measure nodes on mount, which silently
    drops edges (no handle bounds). Force-measure nodes until bounds exist. */
@@ -398,10 +414,13 @@ function App() {
         setGoal(p.goal || "");
         const ns = (Array.isArray(p.steps) ? p.steps : []).map(normalizeStep);
         const savedNodes = (p.map_data && Array.isArray(p.map_data.nodes)) ? p.map_data.nodes : [];
-        if (savedNodes.length && savedNodes.length === ns.length) {
-          // adopt saved node ids so inline step edits stay linked to the map
-          const ordered = [...savedNodes].sort((a, b) => ((a.data && a.data.num) || 0) - ((b.data && b.data.num) || 0));
-          ordered.forEach((n, i) => { if (ns[i]) ns[i].id = n.id; });
+        if (savedNodes.length) {
+          // reuse the saved map exactly (keeps positions, notes, header, branches);
+          // align step ids to the saved step nodes so inline edits stay linked
+          const stepNodes = savedNodes
+            .filter((n) => n.type === "vantum" && !(n.data && n.data.root))
+            .sort((a, b) => ((a.data && a.data.num) || 0) - ((b.data && b.data.num) || 0));
+          stepNodes.forEach((n, i) => { if (ns[i]) ns[i].id = n.id; });
           setNodes(savedNodes);
           setEdges((p.map_data && p.map_data.edges) || []);
         } else {
@@ -576,6 +595,16 @@ function App() {
     toast("Box added — double-click it to name it.");
   }
 
+  function addNote() {
+    const id = newId("note");
+    setNodes((ns) => ns.concat({
+      id, type: "note", deletable: true,
+      data: { text: "" },
+      position: { x: 480, y: 140 + (ns.length % 5) * 70 },
+    }));
+    toast("Note added — double-click to write.");
+  }
+
   /* ----- Claude: change the map ----- */
   function changeWithClaude() {
     if (!changeText.trim()) { toast("Type what you'd like Claude to change."); return; }
@@ -674,10 +703,11 @@ function App() {
 
           ${inputMode === "finished" && html`
             <div class="field">
-              <label>Describe the finished project <span class="hint">— Claude reverse-engineers the steps</span></label>
-              <textarea rows="4" disabled=${locked} value=${finishedDesc} onInput=${(e) => setFinishedDesc(e.target.value)}
-                placeholder="What did you already build? Paste a link or describe it, so it gets documented."></textarea>
+              <label>Paste a link or one line <span class="hint">— Claude does the rest</span></label>
+              <textarea rows="3" disabled=${locked} value=${finishedDesc} onInput=${(e) => setFinishedDesc(e.target.value)}
+                placeholder="A repo/doc/live link, or one sentence — e.g. “the lead-magnet landing page in Carrd”. No writing-up needed."></textarea>
             </div>
+            <div class="muted" style=${{ marginBottom: "4px" }}>No admin work — give the lightest hint and Claude reconstructs the process.</div>
             <div class="row" style=${{ marginTop: "12px" }}>
               <button class="btn-primary" disabled=${locked} onClick=${startWithClaude}>Reverse-engineer with Claude</button>
               <button class="btn-ghost" disabled=${locked} onClick=${() => setPasteOpen(true)}>Paste Claude Output</button>
@@ -781,7 +811,8 @@ function App() {
           ${!locked && nodes.length > 0 && html`
             <div class="flow-toolbar">
               <button class="btn-ghost btn-small" onClick=${addNode}>+ Add box</button>
-              <span class="muted" style=${{ alignSelf: "center" }}>Drag boxes · connect dots · select + Delete to remove</span>
+              <button class="btn-ghost btn-small" onClick=${addNote}>+ Note</button>
+              <span class="muted" style=${{ alignSelf: "center" }}>Drag · connect dots · select + Delete to remove</span>
             </div>`}
           <${ReactFlow}
             nodes=${nodes}

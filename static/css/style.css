@@ -661,3 +661,36 @@ body[data-theme="light"] .react-flow__minimap { background: #FFFFFF !important; 
   border-color: var(--green);
   color: var(--text);
 }
+
+/* ---------- sticky note (ideation, not a step) ---------- */
+.note {
+  width: 200px;
+  min-height: 64px;
+  background: var(--ochre-soft);
+  border: 1px solid rgba(201,123,0,0.45);
+  border-radius: 10px;
+  padding: 10px 12px;
+  color: var(--text);
+  box-shadow: 0 6px 18px rgba(0,0,0,0.2);
+}
+.note-text {
+  font-size: 12.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text);
+  cursor: text;
+  min-height: 44px;
+}
+.note-edit {
+  width: 100%;
+  min-height: 60px;
+  background: transparent;
+  border: none;
+  resize: vertical;
+  color: var(--text);
+  font-size: 12.5px;
+  line-height: 1.5;
+  font-family: inherit;
+}
+.note-edit:focus { outline: none; }
