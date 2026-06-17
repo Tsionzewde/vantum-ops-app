@@ -5,6 +5,51 @@ import htm from "htm";
 
 const html = htm.bind(React.createElement);
 
+function copyText(text) {
+  try { if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(text); return true; } } catch (e) {}
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.select(); document.execCommand("copy"); document.body.removeChild(ta);
+    return true;
+  } catch (e) { return false; }
+}
+function openClaude(prompt) {
+  copyText(prompt);
+  const url = "https://claude.ai/new?q=" + encodeURIComponent(prompt);
+  window.open(url.length <= 6000 ? url : "https://claude.ai/new", "_blank", "noopener");
+}
+function jiraPrompt(p) {
+  const steps = Array.isArray(p.steps) ? p.steps : [];
+  const lines = steps.map((s, i) => {
+    const t = typeof s === "string" ? s : (s.title || s.text || `Step ${i + 1}`);
+    const detail = typeof s === "object" ? (s.detail || "") : "";
+    const phase = typeof s === "object" ? (s.phase || "") : "";
+    return `${i + 1}. ${t}${detail ? " — " + detail : ""}${phase ? " [" + phase + "]" : ""}`;
+  }).join("\n");
+  return `You are Vantum Ops. Using my connected Jira, create the following steps as tasks. If you don't know which Jira project/board to use, ask me first. Create one task per step — put the detail in the description and use the phase as a label.
+
+Project: ${p.name}
+Goal: ${p.goal || "(none)"}
+Steps:
+${lines}`;
+}
+
+function mergePrompt(a, b) {
+  const slim = (p) => ({
+    name: p.name, goal: p.goal,
+    steps: (Array.isArray(p.steps) ? p.steps : []).map((s) => (typeof s === "string" ? { title: s } : { id: s.id, title: s.title, detail: s.detail, phase: s.phase, depends_on: s.depends_on || [] })),
+    resources: p.resources || [],
+  });
+  return `You are Vantum Ops. Merge these two related projects into ONE coherent process. Combine overlapping steps, keep the best order, remove duplicates, and use depends_on to branch where steps run in parallel.
+
+Project A: ${JSON.stringify(slim(a))}
+Project B: ${JSON.stringify(slim(b))}
+
+Return ONLY this JSON, nothing else:
+{"name":"","goal":"","steps":[{"id":"s1","title":"","detail":"","phase":"","depends_on":[]}],"resources":[""]}`;
+}
+
 function fmtDate(iso) {
   if (!iso) return "";
   try {
@@ -135,7 +180,7 @@ function DetailMap({ map }) {
     </div>`;
 }
 
-function Detail({ project, onBack }) {
+function Detail({ project, onBack, onDelete }) {
   const steps = Array.isArray(project.steps) ? project.steps : [];
   const resources = Array.isArray(project.resources) ? project.resources : [];
   const approved = project.status === "Approved";
@@ -145,7 +190,9 @@ function Detail({ project, onBack }) {
         <button class="btn-ghost btn-small" onClick=${onBack}>← Back</button>
         <h2 style=${{ margin: 0, flex: 1 }}>${project.name}</h2>
         <span class=${"badge " + (approved ? "approved" : "active")}>${project.status || "Active"}</span>
+        <button class="btn-ochre btn-small" onClick=${() => openClaude(jiraPrompt(project))}>↗ Push to Jira</button>
         <button class="btn-primary btn-small" onClick=${() => { window.location.href = "/?edit=" + project.id; }}>✎ Edit</button>
+        <button class="btn-danger btn-small" onClick=${() => onDelete && onDelete(project)}>Delete</button>
       </div>
 
       <div style=${{ display: "grid", gridTemplateColumns: "minmax(280px, 380px) 1fr", gap: "18px", alignItems: "start" }} class="detail-grid">
@@ -198,22 +245,48 @@ function Detail({ project, onBack }) {
 function Archive() {
   const [projects, setProjects] = useState(null);
   const [active, setActive] = useState(null);
+  const [selected, setSelected] = useState([]); // ids picked for merge
 
-  useEffect(() => {
-    fetch("/api/projects").then((r) => r.json()).then(setProjects).catch(() => setProjects([]));
-  }, []);
+  function refresh() {
+    return fetch("/api/projects").then((r) => r.json()).then(setProjects).catch(() => setProjects([]));
+  }
+  useEffect(() => { refresh(); }, []);
 
   function openProject(id) {
     fetch("/api/projects/" + id).then((r) => r.json()).then(setActive).catch(() => {});
   }
 
+  function deleteProject(p) {
+    if (!confirm(`Delete "${p.name}"? This can't be undone.`)) return;
+    fetch("/api/projects/" + p.id, { method: "DELETE" })
+      .then(() => { setActive(null); setSelected((s) => s.filter((id) => id !== p.id)); refresh(); })
+      .catch(() => alert("Couldn't delete — check the connection."));
+  }
+
+  function toggleSelect(id) {
+    setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : s.length >= 2 ? [s[1], id] : [...s, id]));
+  }
+
+  async function mergeSelected() {
+    if (selected.length !== 2) return;
+    try {
+      const [a, b] = await Promise.all(selected.map((id) => fetch("/api/projects/" + id).then((r) => r.json())));
+      openClaude(mergePrompt(a, b));
+      alert("Opening Claude to merge the two projects. Paste the JSON it returns into the Builder (Paste Claude Output) to create the merged process.");
+      setSelected([]);
+    } catch (e) { alert("Couldn't load the projects to merge."); }
+  }
+
   if (active) {
-    return html`<div class="archive-wrap"><${Detail} project=${active} onBack=${() => setActive(null)} /></div>`;
+    return html`<div class="archive-wrap"><${Detail} project=${active} onBack=${() => setActive(null)} onDelete=${deleteProject} /></div>`;
   }
 
   return html`
     <div class="archive-wrap">
-      <h2 style=${{ marginTop: 0 }}>Saved Projects</h2>
+      <div style=${{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", marginBottom: "16px", flexWrap: "wrap" }}>
+        <h2 style=${{ margin: 0 }}>Saved Projects</h2>
+        <div class="muted">Tip: tick two projects to merge them into one process.</div>
+      </div>
       ${projects === null && html`<div class="muted">Loading…</div>`}
       ${projects && projects.length === 0 && html`
         <div class="card" style=${{ textAlign: "center", padding: "60px 20px" }}>
@@ -223,7 +296,13 @@ function Archive() {
       ${projects && projects.length > 0 && html`
         <div class="grid">
           ${projects.map((p) => html`
-            <div class="proj-card" key=${p.id} onClick=${() => openProject(p.id)}>
+            <div class=${"proj-card" + (selected.includes(p.id) ? " selected" : "")} key=${p.id} onClick=${() => openProject(p.id)}>
+              <div class="card-head">
+                <label class="pick" onClick=${(e) => e.stopPropagation()}>
+                  <input type="checkbox" checked=${selected.includes(p.id)} onChange=${() => toggleSelect(p.id)} />
+                </label>
+                <button class="card-del" title="Delete" onClick=${(e) => { e.stopPropagation(); deleteProject(p); }}>✕</button>
+              </div>
               <h3>${p.name}</h3>
               <div class="muted">${(Array.isArray(p.steps) ? p.steps.length : 0)} steps</div>
               <div class="meta">
@@ -231,6 +310,13 @@ function Archive() {
                 <span class=${"badge " + (p.status === "Approved" ? "approved" : "active")}>${p.status || "Active"}</span>
               </div>
             </div>`)}
+        </div>`}
+
+      ${selected.length > 0 && html`
+        <div class="merge-bar">
+          <span>${selected.length} selected</span>
+          <button class="btn-ghost btn-small" onClick=${() => setSelected([])}>Clear</button>
+          <button class="btn-primary btn-small" disabled=${selected.length !== 2} onClick=${mergeSelected}>Merge with Claude</button>
         </div>`}
     </div>`;
 }

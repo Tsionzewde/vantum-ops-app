@@ -100,6 +100,16 @@ def create_project(payload):
     return record
 
 
+def delete_project(pid):
+    if supabase:
+        supabase.table(TABLE).delete().eq("id", pid).execute()
+        return True
+    rows = _local_load()
+    new_rows = [r for r in rows if str(r.get("id")) != str(pid)]
+    _local_save(new_rows)
+    return len(new_rows) != len(rows)
+
+
 def update_project(pid, payload):
     record = {k: payload[k] for k in
               ("name", "goal", "team", "steps", "resources", "map_data", "status")
@@ -165,6 +175,15 @@ def api_update(pid):
         if not updated:
             return jsonify({"error": "not found"}), 404
         return jsonify(updated)
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/projects/<pid>", methods=["DELETE"])
+def api_delete(pid):
+    try:
+        delete_project(pid)
+        return jsonify({"ok": True})
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
 
