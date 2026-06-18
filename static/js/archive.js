@@ -15,9 +15,30 @@ function copyText(text) {
   } catch (e) { return false; }
 }
 function openClaude(prompt) {
-  copyText(prompt);
-  const url = "https://claude.ai/new?q=" + encodeURIComponent(prompt);
-  window.open(url.length <= 6000 ? url : "https://claude.ai/new", "_blank", "noopener");
+  const ok = copyText(prompt);
+  const ov = document.createElement("div");
+  ov.className = "overlay open";
+  ov.innerHTML =
+    '<div class="modal">' +
+      '<h2>Your Claude prompt</h2>' +
+      '<p class="modal-sub">' + (ok ? "✓ Copied to your clipboard. Click “Open Claude”, then paste with Ctrl+V." : "Select the text below, copy it, then open Claude and paste.") + '</p>' +
+      '<div class="field"><textarea rows="12" readonly></textarea></div>' +
+      '<div class="modal-actions">' +
+        '<button class="btn-ghost" data-a="close">Close</button>' +
+        '<button class="btn-ghost" data-a="copy">Copy</button>' +
+        '<button class="btn-primary" data-a="open">Open Claude →</button>' +
+      '</div>' +
+    '</div>';
+  ov.querySelector("textarea").value = prompt;
+  document.body.appendChild(ov);
+  const close = () => ov.remove();
+  ov.addEventListener("click", (e) => {
+    if (e.target === ov) return close();
+    const a = e.target.getAttribute && e.target.getAttribute("data-a");
+    if (a === "close") close();
+    else if (a === "copy") copyText(prompt);
+    else if (a === "open") { const u = "https://claude.ai/new?q=" + encodeURIComponent(prompt); window.open(u.length <= 6000 ? u : "https://claude.ai/new", "_blank", "noopener"); }
+  });
 }
 function jiraPrompt(p) {
   const steps = Array.isArray(p.steps) ? p.steps : [];

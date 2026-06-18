@@ -422,6 +422,15 @@ function App() {
   const [guideOpen, setGuideOpen] = useState(false);
   const [pasteOpen, setPasteOpen] = useState(false);
   const [rawJson, setRawJson] = useState("");
+  const [promptOpen, setPromptOpen] = useState(false);
+  const [promptText, setPromptText] = useState("");
+  const [promptCopied, setPromptCopied] = useState(false);
+
+  function launchClaude(prompt) {
+    setPromptCopied(copyText(prompt));
+    setPromptText(prompt);
+    setPromptOpen(true);
+  }
 
   const [name, setName] = useState("");
   const [goal, setGoal] = useState("");
@@ -484,12 +493,12 @@ function App() {
   function startWithClaude() {
     if (inputMode === "idea") {
       if (!desc.trim()) { toast("Describe your idea first — open the guide if unsure."); return; }
-      openClaude(IDEA_PROMPT(desc.trim()));
+      launchClaude(IDEA_PROMPT(desc.trim()));
     } else if (inputMode === "call") {
-      openClaude(CALL_PROMPT(callRef, callPerson.trim() || "me"));
+      launchClaude(CALL_PROMPT(callRef, callPerson.trim() || "me"));
     } else {
       if (!finishedDesc.trim()) { toast("Describe the finished project first."); return; }
-      openClaude(REVERSE_PROMPT(finishedDesc.trim()));
+      launchClaude(REVERSE_PROMPT(finishedDesc.trim()));
     }
   }
 
@@ -660,8 +669,7 @@ function App() {
   }
 
   function pushToJira() {
-    openClaude(jiraPrompt(name, goal, steps));
-    toast("Opening Claude to create these as Jira tasks.");
+    launchClaude(jiraPrompt(name, goal, steps));
   }
 
   /* ----- Claude: change the map ----- */
@@ -676,7 +684,7 @@ function App() {
         edges: edges.map((e) => ({ source: e.source, target: e.target })),
       },
     };
-    openClaude(CHANGE_PROMPT(state, changeText.trim()));
+    launchClaude(CHANGE_PROMPT(state, changeText.trim()));
   }
 
   /* ----- approve & save ----- */
@@ -936,6 +944,21 @@ function App() {
         </div>
       </div>`;
 
+  const promptOverlay = html`
+      <div class=${"overlay" + (promptOpen ? " open" : "")} onClick=${(e) => { if (e.target === e.currentTarget) setPromptOpen(false); }}>
+        <div class="modal">
+          <h2>Your Claude prompt</h2>
+          <p class="modal-sub">${promptCopied ? "✓ Copied to your clipboard. Click “Open Claude”, then paste with Ctrl+V." : "Select the text below, copy it, then open Claude and paste."}</p>
+          <div class="field">
+            <textarea rows="12" readonly value=${promptText} onFocus=${(e) => e.target.select()}></textarea>
+          </div>
+          <div class="modal-actions">
+            <button class="btn-ghost" onClick=${() => { copyText(promptText); toast("Prompt copied."); }}>Copy</button>
+            <button class="btn-primary" onClick=${() => { const u = "https://claude.ai/new?q=" + encodeURIComponent(promptText); window.open(u.length <= 6000 ? u : "https://claude.ai/new", "_blank", "noopener"); }}>Open Claude →</button>
+          </div>
+        </div>
+      </div>`;
+
   return html`
     <${NodeEditCtx.Provider} value=${{ editable: !locked, update: updateNodeData }}>
       ${!hasContent
@@ -949,6 +972,7 @@ function App() {
             </div>
           </div>`}
       ${pasteOverlay}
+      ${promptOverlay}
     <//>`;
 }
 
