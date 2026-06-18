@@ -231,7 +231,7 @@ function buildFlowFromSteps(steps, projectName) {
     rowOf[s.id] = rowCount[c]++;
   });
 
-  const COL_W = 340, ROW_H = 195, START_X = 60, NODE_HALF = 140;
+  const COL_W = 400, ROW_H = 250, START_X = 60, NODE_HALF = 140;
   const hasRoot = !!(projectName && projectName.trim());
   const yBase = hasRoot ? 150 : 40;
   const maxCol = Math.max(0, ...steps.map((s) => colOf[s.id]));
