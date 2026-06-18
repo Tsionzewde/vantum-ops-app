@@ -252,26 +252,29 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 }
 .list-tag button:hover { opacity: 1; }
 
-.step-block { margin-bottom: 12px; }
-.step-sub { display: flex; gap: 8px; margin: 6px 0 0 36px; }
+.step-block { margin-bottom: 14px; }
+.step-sub { display: flex; flex-direction: column; align-items: stretch; gap: 8px; margin: 8px 0 0 36px; }
 .step-sub .step-detail {
-  flex: 1;
+  flex: none;
+  width: 100%;
   background: var(--bg);
   border: 1px solid var(--border-soft);
   border-radius: 8px;
-  padding: 8px 11px;
+  padding: 9px 12px;
   color: var(--muted);
-  font-size: 12.5px;
+  font-size: 13.5px;
   font-family: inherit;
 }
 .step-sub .step-phase {
-  flex: 0 0 92px;
+  flex: none;
+  align-self: flex-start;
+  width: 170px;
   background: var(--bg);
   border: 1px solid var(--border-soft);
   border-radius: 8px;
-  padding: 8px 10px;
+  padding: 9px 11px;
   color: var(--ochre);
-  font-size: 12px;
+  font-size: 12.5px;
   font-weight: 600;
   font-family: inherit;
 }
@@ -446,8 +449,8 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .flow-wrap { position: absolute; inset: 0 0 72px 0; }
 .flow-toolbar {
   position: absolute;
-  top: 14px; left: 132px;
-  display: flex; gap: 8px; z-index: 6;
+  top: 62px; left: 14px;
+  display: flex; flex-direction: column; gap: 8px; z-index: 6;
 }
 .panel-toggle {
   position: absolute;
@@ -541,7 +544,7 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .proj-card .meta { display: flex; justify-content: space-between; align-items: center; margin-top: 14px; }
 .proj-card .date { font-size: 12px; color: var(--muted-2); }
 
-.detail-map { height: 60vh; border: 1px solid var(--border); border-radius: 14px; overflow: hidden; position: relative; }
+.detail-map { height: calc(100vh - 220px); min-height: 440px; border: 1px solid var(--border); border-radius: 14px; overflow: hidden; position: relative; margin-top: 6px; }
 .detail-map.expanded {
   position: fixed;
   inset: 14px;
@@ -791,3 +794,31 @@ body[data-theme="light"] .react-flow__minimap { background: #FFFFFF !important; 
   padding: 0;
   cursor: pointer;
 }
+
+/* ---------- board-first scroll page ---------- */
+.page { display: block; }
+.canvas-section {
+  position: relative;
+  height: calc(100vh - 59px);
+  border-bottom: 1px solid var(--border-soft);
+}
+.canvas-section .board-main { position: absolute; inset: 0; }
+.text-section { max-width: 1000px; margin: 0 auto; padding: 30px 26px 90px; }
+.scroll-hint {
+  text-align: center;
+  color: var(--muted-2);
+  font-size: 11px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase;
+  margin-bottom: 20px;
+}
+.back-btn {
+  position: absolute; top: 14px; left: 14px; z-index: 7;
+  width: 36px; height: 36px; border-radius: 9px;
+  background: var(--panel-2); border: 1px solid var(--border);
+  color: var(--text); font-size: 18px; line-height: 1;
+  display: grid; place-items: center; cursor: pointer;
+}
+.back-btn:hover { border-color: var(--green); }
+
+/* archive detail: canvas first, list below */
+.detail-canvas { position: relative; height: calc(100vh - 160px); min-height: 420px; border: 1px solid var(--border); border-radius: 14px; overflow: hidden; }
+.detail-text { max-width: 1000px; margin: 24px auto 0; }

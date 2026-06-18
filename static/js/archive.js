@@ -27,7 +27,7 @@ function jiraPrompt(p) {
     const phase = typeof s === "object" ? (s.phase || "") : "";
     return `${i + 1}. ${t}${detail ? " — " + detail : ""}${phase ? " [" + phase + "]" : ""}`;
   }).join("\n");
-  return `You are Vantum Ops. Using my connected Jira, create the following steps as tasks. If you don't know which Jira project/board to use, ask me first. Create one task per step — put the detail in the description and use the phase as a label.
+  return `You are Vantum Ops. Using my connected Jira, create the following steps as tasks. There are many people in this Jira — before creating anything, ask me (1) which Jira project/board to use and (2) who to ASSIGN these tasks to. Then create one task per step, all assigned to that person, with the detail in the description and the phase as a label.
 
 Project: ${p.name}
 Goal: ${p.goal || "(none)"}
@@ -169,6 +169,7 @@ function DetailMap({ map }) {
         <${ReactFlow}
           nodes=${nodes} edges=${edges} nodeTypes=${nodeTypes}
           nodesDraggable=${false} nodesConnectable=${false} elementsSelectable=${false}
+          minZoom=${0.2} maxZoom=${2}
           fitView proOptions=${{ hideAttribution: true }}>
           <${MeasureFix} ids=${nodes.map((n) => n.id)} />
           <${Background} color="#1B2C45" gap=${22} />
@@ -195,48 +196,45 @@ function Detail({ project, onBack, onDelete }) {
         <button class="btn-danger btn-small" onClick=${() => onDelete && onDelete(project)}>Delete</button>
       </div>
 
-      <div style=${{ display: "grid", gridTemplateColumns: "minmax(280px, 380px) 1fr", gap: "18px", alignItems: "start" }} class="detail-grid">
-        <div>
-          <div class="card">
-            <span class="panel-title">Goal</span>
-            <div>${project.goal || html`<span class="muted">—</span>`}</div>
-            ${project.team && html`<hr class="divider" /><span class="panel-title">Team</span><div>${project.team}</div>`}
-          </div>
-          <div class="card">
-            <span class="panel-title">Written process</span>
-            ${steps.length === 0 && html`<div class="muted">No steps.</div>`}
-            ${steps.map((s, i) => html`
-              <div class="step-row" key=${i} style=${{ alignItems: "flex-start" }}>
-                <span class="step-num">${i + 1}</span>
-                <div style=${{ flex: 1, paddingTop: "3px" }}>
-                  <div style=${{ fontSize: "14px", lineHeight: 1.5 }}>${stepTitle(s)}
-                    ${stepPhase(s) && html` <span class="phase-chip">${stepPhase(s)}</span>`}
-                  </div>
-                  ${stepDetail(s) && html`<div class="muted" style=${{ marginTop: "2px" }}>${stepDetail(s)}</div>`}
-                </div>
-              </div>`)}
-          </div>
-          <div class="card">
-            <span class="panel-title">Resources</span>
-            ${resources.length === 0 && html`<div class="muted">None.</div>`}
-            <div>
-              ${resources.map((r, i) => {
-                if (r && r.kind === "file") {
-                  return html`<div class="res-file" key=${i}>
-                    <svg class="res-icon" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm4 18H6V4h7v5h5v11z"/></svg>
-                    <span class="res-name">${r.name}</span>
-                    <button type="button" class="mini" onClick=${() => openFileResource(r)}>Open</button>
-                  </div>`;
-                }
-                const label = typeof r === "string" ? r : (r && (r.value || r.name)) || "";
-                return html`<span class="list-tag" key=${i}>${label}</span>`;
-              })}
-            </div>
-          </div>
+      <span class="panel-title">Process map</span>
+      <${DetailMap} map=${project.map_data} />
+
+      <div class="detail-text">
+        <div class="card">
+          <span class="panel-title">Goal</span>
+          <div>${project.goal || html`<span class="muted">—</span>`}</div>
+          ${project.team && html`<hr class="divider" /><span class="panel-title">Team</span><div>${project.team}</div>`}
         </div>
-        <div>
-          <span class="panel-title">Process map</span>
-          <${DetailMap} map=${project.map_data} />
+        <div class="card">
+          <span class="panel-title">Written process</span>
+          ${steps.length === 0 && html`<div class="muted">No steps.</div>`}
+          ${steps.map((s, i) => html`
+            <div class="step-row" key=${i} style=${{ alignItems: "flex-start" }}>
+              <span class="step-num">${i + 1}</span>
+              <div style=${{ flex: 1, paddingTop: "3px" }}>
+                <div style=${{ fontSize: "15px", lineHeight: 1.5 }}>${stepTitle(s)}
+                  ${stepPhase(s) && html` <span class="phase-chip">${stepPhase(s)}</span>`}
+                </div>
+                ${stepDetail(s) && html`<div class="muted" style=${{ marginTop: "3px", fontSize: "13.5px" }}>${stepDetail(s)}</div>`}
+              </div>
+            </div>`)}
+        </div>
+        <div class="card">
+          <span class="panel-title">Resources</span>
+          ${resources.length === 0 && html`<div class="muted">None.</div>`}
+          <div>
+            ${resources.map((r, i) => {
+              if (r && r.kind === "file") {
+                return html`<div class="res-file" key=${i}>
+                  <svg class="res-icon" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm4 18H6V4h7v5h5v11z"/></svg>
+                  <span class="res-name">${r.name}</span>
+                  <button type="button" class="mini" onClick=${() => openFileResource(r)}>Open</button>
+                </div>`;
+              }
+              const label = typeof r === "string" ? r : (r && (r.value || r.name)) || "";
+              return html`<span class="list-tag" key=${i}>${label}</span>`;
+            })}
+          </div>
         </div>
       </div>
     </div>`;

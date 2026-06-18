@@ -136,7 +136,7 @@ function jiraPrompt(name, goal, steps) {
     const t = s.text || s.title || `Step ${i + 1}`;
     return `${i + 1}. ${t}${s.detail ? " — " + s.detail : ""}${s.phase ? " [" + s.phase + "]" : ""}`;
   }).join("\n");
-  return `You are Vantum Ops. Using my connected Jira, create the following approved steps as tasks. If you don't know which Jira project/board to use, ask me first. Create one task per step — put the step's detail in the task description and use the phase as a label.
+  return `You are Vantum Ops. Using my connected Jira, create the following approved steps as tasks. There are many people in this Jira — before creating anything, ask me (1) which Jira project/board to use and (2) who to ASSIGN these tasks to. Then create one task per step, all assigned to that person, with the step's detail in the description and the phase as a label.
 
 Project: ${name}
 Goal: ${goal || "(none)"}
@@ -231,7 +231,7 @@ function buildFlowFromSteps(steps, projectName) {
     rowOf[s.id] = rowCount[c]++;
   });
 
-  const COL_W = 400, ROW_H = 250, START_X = 60, NODE_HALF = 140;
+  const COL_W = 380, ROW_H = 220, START_X = 60, NODE_HALF = 140;
   const hasRoot = !!(projectName && projectName.trim());
   const yBase = hasRoot ? 150 : 40;
   const maxCol = Math.max(0, ...steps.map((s) => colOf[s.id]));
@@ -864,6 +864,7 @@ function App() {
 
   const board = html`
     <div class="board-main">
+      <button class="back-btn" title="Back" onClick=${() => window.history.back()}>←</button>
       ${!locked && nodes.length > 0 && html`
         <div class="flow-toolbar">
           <button class="btn-ghost btn-small" onClick=${addNode}>+ Step box</button>
@@ -883,6 +884,8 @@ function App() {
           nodes=${nodes}
           edges=${edges}
           nodeTypes=${nodeTypes}
+          minZoom=${0.2}
+          maxZoom=${2}
           onNodesChange=${locked ? undefined : onNodesChange}
           onNodesDelete=${locked ? undefined : onNodesDelete}
           onEdgesChange=${locked ? undefined : onEdgesChange}
@@ -913,6 +916,7 @@ function App() {
           onInput=${(e) => setChangeText(e.target.value)}
           onKeyDown=${(e) => { if (e.key === "Enter") changeWithClaude(); }} />
         <button class="btn-ochre" disabled=${locked} onClick=${changeWithClaude}>Ask Claude to change</button>
+        <button class="btn-ghost" onClick=${() => setPasteOpen(true)}>Paste</button>
       </div>
     </div>`;
 
@@ -937,13 +941,11 @@ function App() {
       ${!hasContent
         ? html`<div class="landing-wrap">${funnel()}</div>`
         : html`
-          <div class="board-layout">
-            ${board}
-            <div class=${"drawer" + (drawerOpen ? " open" : "")}>
-              <button class="drawer-toggle" onClick=${() => setDrawerOpen(!drawerOpen)}>
-                ${drawerOpen ? "▾ Hide written process & details" : "▴ Show written process & details"}
-              </button>
-              ${drawerOpen && html`<div class="drawer-body">${detailsBlock}<hr class="divider" />${funnel()}</div>`}
+          <div class="page">
+            <div class="canvas-section">${board}</div>
+            <div class="text-section">
+              <div class="scroll-hint">Written process &amp; details</div>
+              ${detailsBlock}
             </div>
           </div>`}
       ${pasteOverlay}
