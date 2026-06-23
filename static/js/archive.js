@@ -152,6 +152,10 @@ function stepDetail(s) {
 function stepPhase(s) {
   return (s && typeof s === "object" && s.phase) || "";
 }
+function stepSubs(s) {
+  const raw = s && typeof s === "object" && (s.subs || s.substeps);
+  return Array.isArray(raw) ? raw.map((x) => (typeof x === "string" ? x : (x && (x.title || x.text)) || "")).filter(Boolean) : [];
+}
 
 function openFileResource(r) {
   try {
@@ -206,9 +210,10 @@ function Detail({ project, onBack, onDelete }) {
   const steps = Array.isArray(project.steps) ? project.steps : [];
   const resources = Array.isArray(project.resources) ? project.resources : [];
   const approved = project.status === "Approved";
+  const overview = (project.map_data && project.map_data.overview) || "";
   return html`
     <div>
-      <div style=${{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "18px" }}>
+      <div style=${{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "14px", flexWrap: "wrap" }}>
         <button class="btn-ghost btn-small" onClick=${onBack}>← Back</button>
         <h2 style=${{ margin: 0, flex: 1 }}>${project.name}</h2>
         <span class=${"badge " + (approved ? "approved" : "active")}>${project.status || "Active"}</span>
@@ -216,6 +221,8 @@ function Detail({ project, onBack, onDelete }) {
         <button class="btn-primary btn-small" onClick=${() => { window.location.href = "/?edit=" + project.id; }}>✎ Edit</button>
         <button class="btn-danger btn-small" onClick=${() => onDelete && onDelete(project)}>Delete</button>
       </div>
+
+      ${overview && html`<div class="detail-overview">${overview}</div>`}
 
       <span class="panel-title">Process map</span>
       <${DetailMap} map=${project.map_data} />
@@ -237,6 +244,7 @@ function Detail({ project, onBack, onDelete }) {
                   ${stepPhase(s) && html` <span class="phase-chip">${stepPhase(s)}</span>`}
                 </div>
                 ${stepDetail(s) && html`<div class="muted" style=${{ marginTop: "3px", fontSize: "13.5px" }}>${stepDetail(s)}</div>`}
+                ${stepSubs(s).length > 0 && html`<ul class="vnode-subs" style=${{ marginTop: "5px" }}>${stepSubs(s).map((x, si) => html`<li key=${si}>${x}</li>`)}</ul>`}
               </div>
             </div>`)}
         </div>

@@ -35,8 +35,8 @@ const EXAMPLE_DESC =
   "Goal: collect 300 emails in 30 days. I'll write the guide in Google Docs, design it in Canva, " +
   "build a landing page in Carrd, hook up Mailchimp to deliver it, and promote it on LinkedIn for two weeks.";
 
-const SCHEMA = `{"name":"","goal":"","steps":[{"id":"s1","title":"","detail":"","phase":"","depends_on":[]}],"resources":[""]}`;
-const SCHEMA_RULES = `Each step has an id (s1, s2…), a short title (3-6 words), a one-line detail, a phase (e.g. "Plan", "Build", "Launch", "Review"), and depends_on (list of step ids it follows — empty for the first). Use depends_on to show branching.`;
+const SCHEMA = `{"name":"","goal":"","overview":"","steps":[{"id":"s1","title":"","detail":"","phase":"","depends_on":[],"subs":[""]}],"resources":[""]}`;
+const SCHEMA_RULES = `Fields: overview = 1-2 plain-language sentences explaining what this process is, for someone seeing it for the first time. Each step has an id (s1, s2…), a short title (3-6 words), a one-line detail, a phase (e.g. "Plan", "Build", "Launch", "Review"), depends_on (list of step ids it follows — empty for the first), and subs (a list of granular sub-steps under that step — be detailed, don't be vague). Use depends_on to show branching.`;
 
 // ① Idea → confirm, ask questions, then deep-reasoned plan
 const IDEA_PROMPT = (idea) =>
@@ -78,7 +78,15 @@ Requested change: ${change}
 
 If the change references a meeting/call, pull that call from my connected Fathom and apply its feedback. Keep step ids stable, change only what's needed, and use depends_on (list of step ids) for branching.
 Return ONLY the full updated project as JSON in this exact format, nothing else:
-{"name":"","goal":"","steps":[{"id":"s1","title":"","detail":"","phase":"","depends_on":[]}],"resources":[""]}`;
+${SCHEMA}
+${SCHEMA_RULES}`;
+
+// ④ Extract from work already done in a Claude chat
+const EXTRACT_PROMPT = () =>
+`You are Vantum Ops. Take the project/plan we've already worked out in THIS conversation and turn it into a structured process — don't ask me to re-explain it.
+Return ONLY this JSON, nothing else:
+${SCHEMA}
+${SCHEMA_RULES}`;
 
 /* ---------------- helpers ---------------- */
 let toastEl = null;
@@ -158,8 +166,14 @@ function parseClaudeJSON(raw) {
 let SEQ = 0;
 const newId = (p) => `${p}-${Math.random().toString(36).slice(2, 7)}-${SEQ++}`;
 
+function normalizeSubs(s) {
+  const raw = s && (s.subs || s.substeps || s.sub_steps);
+  if (!Array.isArray(raw)) return [];
+  return raw.map((x) => (typeof x === "string" ? x : (x && (x.title || x.text)) || String(x))).filter((x) => x && x.trim());
+}
+
 function normalizeStep(s, i) {
-  if (typeof s === "string") return { id: newId("step"), srcId: String(i + 1), text: s, detail: "", phase: "", deps: [] };
+  if (typeof s === "string") return { id: newId("step"), srcId: String(i + 1), text: s, detail: "", phase: "", deps: [], subs: [] };
   return {
     id: newId("step"),
     srcId: s && s.id != null ? String(s.id) : String(i + 1),
@@ -167,6 +181,7 @@ function normalizeStep(s, i) {
     detail: (s && (s.detail || s.description)) || "",
     phase: (s && s.phase) || "",
     deps: Array.isArray(s && s.depends_on) ? s.depends_on.map(String) : [],
+    subs: normalizeSubs(s),
   };
 }
 
@@ -186,7 +201,7 @@ function phaseColorMap(steps) {
   return map;
 }
 
-function buildFlowFromSteps(steps, projectName) {
+function buildFlowFromSteps(steps, projectName, overview) {
   const colors = phaseColorMap(steps);
   const bySrc = {};
   steps.forEach((s) => { if (s.srcId != null) bySrc[s.srcId] = s.id; });
@@ -243,6 +258,7 @@ function buildFlowFromSteps(steps, projectName) {
       label: s.text || `Step ${i + 1}`,
       detail: s.detail || "",
       phase: s.phase || "",
+      subs: s.subs || [],
       color: colors[(s.phase || "").trim()] || "#059669",
       num: i + 1,
     },
@@ -276,7 +292,7 @@ function buildFlowFromSteps(steps, projectName) {
       id: "root",
       type: "vantum",
       deletable: false,
-      data: { label: projectName.trim(), root: true, color: "#C97B00" },
+      data: { label: projectName.trim(), root: true, overview: (overview || "").trim(), color: "#C97B00" },
       position: { x: START_X + (maxCol / 2) * COL_W, y: 20 },
     });
   }
@@ -306,6 +322,7 @@ function VantumNode({ id, data }) {
               onBlur=${(e) => { ctx.update(id, { label: e.target.value.trim() || data.label }); setEditTitle(false); }}
               onKeyDown=${(e) => { if (e.key === "Enter") { e.preventDefault(); e.target.blur(); } if (e.key === "Escape") setEditTitle(false); }} />`
           : html`<span class="vroot-title" onDoubleClick=${() => ctx.editable && setEditTitle(true)}>${data.label}</span>`}
+        ${data.overview && html`<div class="vroot-overview">${data.overview}</div>`}
         <${Handle} id="out-b" type="source" position=${Position.Bottom} />
       </div>`;
   }
@@ -336,7 +353,9 @@ function VantumNode({ id, data }) {
           ? html`<textarea class="vnode-edit-area nodrag" defaultValue=${data.detail} autoFocus
               onPointerDown=${stop} onBlur=${commitDetail}
               onKeyDown=${(e) => { if (e.key === "Escape") setEditDetail(false); }}></textarea>`
-          : html`<div class="vnode-detail" title=${ctx.editable ? "Double-click to edit" : ""} onDoubleClick=${() => ctx.editable && setEditDetail(true)}>${data.detail || (ctx.editable ? "Double-click to add details…" : "")}</div>`}`}
+          : html`<div class="vnode-detail" title=${ctx.editable ? "Double-click to edit" : ""} onDoubleClick=${() => ctx.editable && setEditDetail(true)}>${data.detail || (ctx.editable ? "Double-click to add details…" : "")}</div>`}
+        ${data.subs && data.subs.length > 0 && html`
+          <ul class="vnode-subs">${data.subs.map((x, i) => html`<li key=${i}>${x}</li>`)}</ul>`}`}
       <${Handle} id="out-b" type="source" position=${Position.Bottom} />
       <${Handle} id="out-r" type="source" position=${Position.Right} />
     </div>`;
@@ -434,7 +453,8 @@ function App() {
 
   const [name, setName] = useState("");
   const [goal, setGoal] = useState("");
-  const [steps, setSteps] = useState([]); // [{id, text, detail, phase}]
+  const [overview, setOverview] = useState("");
+  const [steps, setSteps] = useState([]); // [{id, text, detail, phase, deps, subs}]
   const [resources, setResources] = useState([]); // [{kind:'text'|'file', ...}]
 
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
@@ -465,6 +485,7 @@ function App() {
         setEditingId(p.id);
         setName(p.name || "");
         setGoal(p.goal || "");
+        setOverview((p.map_data && p.map_data.overview) || "");
         const ns = (Array.isArray(p.steps) ? p.steps : []).map(normalizeStep);
         const savedNodes = (p.map_data && Array.isArray(p.map_data.nodes)) ? p.map_data.nodes : [];
         if (savedNodes.length) {
@@ -477,7 +498,7 @@ function App() {
           setNodes(savedNodes);
           setEdges((p.map_data && p.map_data.edges) || []);
         } else {
-          const flow = buildFlowFromSteps(ns, p.name);
+          const flow = buildFlowFromSteps(ns, p.name, (p.map_data && p.map_data.overview) || "");
           setNodes(flow.nodes);
           setEdges(flow.edges);
         }
@@ -496,6 +517,8 @@ function App() {
       launchClaude(IDEA_PROMPT(desc.trim()));
     } else if (inputMode === "call") {
       launchClaude(CALL_PROMPT(callRef, callPerson.trim() || "me"));
+    } else if (inputMode === "extract") {
+      launchClaude(EXTRACT_PROMPT());
     } else {
       if (!finishedDesc.trim()) { toast("Describe the finished project first."); return; }
       launchClaude(REVERSE_PROMPT(finishedDesc.trim()));
@@ -513,10 +536,11 @@ function App() {
     }
     setName(data.name || "");
     setGoal(data.goal || "");
+    setOverview(data.overview || "");
     const newSteps = (Array.isArray(data.steps) ? data.steps : []).map(normalizeStep);
     setSteps(newSteps);
     setResources((Array.isArray(data.resources) ? data.resources : []).map(normalizeResource));
-    const flow = buildFlowFromSteps(newSteps, data.name);
+    const flow = buildFlowFromSteps(newSteps, data.name, data.overview || "");
     setNodes(flow.nodes);
     setEdges(flow.edges);
     setStatus("Active");
@@ -535,24 +559,37 @@ function App() {
       if ("text" in patch) d.label = patch.text;
       if ("detail" in patch) d.detail = patch.detail;
       if ("phase" in patch) d.phase = patch.phase;
+      if ("subs" in patch) d.subs = patch.subs;
       return { ...n, data: d };
     }));
   }
+  function newStepNode(ns, id) {
+    return {
+      id, type: "vantum",
+      data: { label: "New step", detail: "", phase: "", subs: [], color: "#059669", num: ns.filter((n) => !(n.data && n.data.root)).length + 1 },
+      position: { x: 160, y: 120 + (ns.length % 6) * 80 },
+    };
+  }
   function addStep() {
     const id = newId("step");
-    setSteps((arr) => {
-      const prev = arr[arr.length - 1];
-      if (prev) {
-        setEdges((es) => addEdge({ id: `e-${prev.id}-${id}`, source: prev.id, target: id, ...EDGE_OPTS }, es));
-      }
-      return [...arr, { id, text: "", detail: "", phase: "" }];
-    });
-    setNodes((ns) => ns.concat({
-      id, type: "vantum",
-      data: { label: "New step", detail: "", phase: "", color: "#059669", num: ns.length + 1 },
-      position: { x: 140, y: 50 + ns.length * 150 },
-    }));
+    setSteps((arr) => [...arr, { id, srcId: id, text: "", detail: "", phase: "", deps: [], subs: [] }]);
+    setNodes((ns) => ns.concat(newStepNode(ns, id)));
   }
+  function insertStepAfter(afterId) {
+    const id = newId("step");
+    setSteps((arr) => {
+      const idx = arr.findIndex((s) => s.id === afterId);
+      const copy = [...arr];
+      copy.splice(idx < 0 ? arr.length : idx + 1, 0, { id, srcId: id, text: "", detail: "", phase: "", deps: [], subs: [] });
+      return copy;
+    });
+    setNodes((ns) => ns.concat(newStepNode(ns, id)));
+    toast("Step inserted — name it, then connect it on the board.");
+  }
+  // sub-steps
+  const addSub = (stepId) => { const s = steps.find((x) => x.id === stepId); patchStep(stepId, { subs: [...((s && s.subs) || []), ""] }); };
+  const updateSub = (stepId, i, v) => { const s = steps.find((x) => x.id === stepId); const arr = [...((s && s.subs) || [])]; arr[i] = v; patchStep(stepId, { subs: arr }); };
+  const removeSub = (stepId, i) => { const s = steps.find((x) => x.id === stepId); patchStep(stepId, { subs: ((s && s.subs) || []).filter((_, idx) => idx !== i) }); };
   function removeStep(id) {
     setSteps((arr) => arr.filter((s) => s.id !== id));
     setNodes((ns) => ns.filter((n) => n.id !== id));
@@ -579,10 +616,16 @@ function App() {
   }, []);
 
   function rebuildMap() {
-    const flow = buildFlowFromSteps(steps, name);
+    const flow = buildFlowFromSteps(steps, name, overview);
     setNodes(flow.nodes);
     setEdges(flow.edges);
     toast("Map rebuilt from the written steps.");
+  }
+
+  // edit the Overview and keep the header node in sync
+  function patchOverview(v) {
+    setOverview(v);
+    setNodes((ns) => ns.map((n) => (n.id === "root" ? { ...n, data: { ...n.data, overview: v } } : n)));
   }
 
   /* ----- resources ----- */
@@ -676,8 +719,8 @@ function App() {
   function changeWithClaude() {
     if (!changeText.trim()) { toast("Type what you'd like Claude to change."); return; }
     const state = {
-      name, goal,
-      steps: steps.map((s) => ({ id: s.srcId || s.id, title: s.text, detail: s.detail, phase: s.phase, depends_on: s.deps || [] })),
+      name, goal, overview,
+      steps: steps.map((s) => ({ id: s.srcId || s.id, title: s.text, detail: s.detail, phase: s.phase, depends_on: s.deps || [], subs: s.subs || [] })),
       resources: resources.map((r) => (r.kind === "file" ? r.name + " (uploaded file)" : r.value)),
       map: {
         nodes: nodes.map((n) => ({ id: n.id, label: n.data.label, position: n.position })),
@@ -693,9 +736,9 @@ function App() {
     setSaving(true);
     const payload = {
       name, goal,
-      steps: steps.map((s) => ({ id: s.srcId || s.id, title: s.text, detail: s.detail, phase: s.phase, depends_on: s.deps || [] })),
+      steps: steps.map((s) => ({ id: s.srcId || s.id, title: s.text, detail: s.detail, phase: s.phase, depends_on: s.deps || [], subs: s.subs || [] })),
       resources,
-      map_data: { nodes, edges },
+      map_data: { nodes, edges, overview },
       status: "Approved",
     };
     try {
@@ -724,6 +767,7 @@ function App() {
           <div class="modes">
             <button class=${"mode" + (inputMode === "idea" ? " on" : "")} disabled=${locked} onClick=${() => setInputMode("idea")}>💡 Idea</button>
             <button class=${"mode" + (inputMode === "call" ? " on" : "")} disabled=${locked} onClick=${() => setInputMode("call")}>🎙️ From a call</button>
+            <button class=${"mode" + (inputMode === "extract" ? " on" : "")} disabled=${locked} onClick=${() => setInputMode("extract")}>📋 From my Claude chat</button>
             <button class=${"mode" + (inputMode === "finished" ? " on" : "")} disabled=${locked} onClick=${() => setInputMode("finished")}>📦 Finished project</button>
           </div>
 
@@ -764,13 +808,22 @@ function App() {
               </select>
             </div>
             <div class="field">
-              <label>Which call? <span class="hint">— date or keywords (optional)</span></label>
-              <input disabled=${locked} value=${callRef} onInput=${(e) => setCallRef(e.target.value)}
-                placeholder="e.g. the June 6 call about the lead magnet" />
+              <label>Call date <span class="hint">— which day's meeting</span></label>
+              <input type="date" disabled=${locked} value=${callRef} onInput=${(e) => setCallRef(e.target.value)} />
             </div>
-            <div class="muted" style=${{ marginBottom: "4px" }}>Pulls your assigned task from Fathom. Requires Fathom connected in your Claude account.</div>
+            <div class="muted" style=${{ marginBottom: "4px" }}>Pulls that person's task from Fathom. Requires Fathom connected in your Claude account.</div>
             <div class="row" style=${{ marginTop: "12px" }}>
               <button class="btn-primary" disabled=${locked} onClick=${startWithClaude}>Pull from the call</button>
+              <button class="btn-ghost" disabled=${locked} onClick=${() => setPasteOpen(true)}>Paste Claude Output</button>
+            </div>`}
+
+          ${inputMode === "extract" && html`
+            <div class="field">
+              <label>Already planned it in Claude?</label>
+              <div class="muted">If you've worked the whole thing out in a Claude chat, this gives you a prompt to drop into <em>that same chat</em> — Claude turns it into the process. Then paste the JSON back.</div>
+            </div>
+            <div class="row" style=${{ marginTop: "12px" }}>
+              <button class="btn-primary" disabled=${locked} onClick=${startWithClaude}>Get the extract prompt</button>
               <button class="btn-ghost" disabled=${locked} onClick=${() => setPasteOpen(true)}>Paste Claude Output</button>
             </div>`}
 
@@ -798,6 +851,10 @@ function App() {
               <input value=${name} disabled=${locked} onInput=${(e) => setName(e.target.value)} placeholder="Project name" />
             </div>
             <div class="field">
+              <label>Overview <span class="hint">— plain-language: what is this, for someone new</span></label>
+              <textarea value=${overview} disabled=${locked} onInput=${(e) => patchOverview(e.target.value)} rows="2" placeholder="In one or two sentences, what is this process?"></textarea>
+            </div>
+            <div class="field">
               <label>Goal</label>
               <textarea value=${goal} disabled=${locked} onInput=${(e) => setGoal(e.target.value)} rows="2" placeholder="What is the goal?"></textarea>
             </div>
@@ -823,6 +880,19 @@ function App() {
                 <div class="step-sub">
                   <input class="step-detail" value=${s.detail} disabled=${locked} onInput=${(e) => patchStep(s.id, { detail: e.target.value })} placeholder="Detail — what exactly happens here?" />
                   <input class="step-phase" value=${s.phase} disabled=${locked} onInput=${(e) => patchStep(s.id, { phase: e.target.value })} placeholder="Phase" />
+                  <div class="substeps">
+                    ${(s.subs || []).map((sub, si) => html`
+                      <div class="substep-row" key=${si}>
+                        <span class="substep-dot">•</span>
+                        <input value=${sub} disabled=${locked} onInput=${(e) => updateSub(s.id, si, e.target.value)} placeholder="Sub-step" />
+                        ${!locked && html`<button class="x" onClick=${() => removeSub(s.id, si)}>✕</button>`}
+                      </div>`)}
+                    ${!locked && html`
+                      <div class="substep-actions">
+                        <button class="btn-ghost btn-small" onClick=${() => addSub(s.id)}>+ Sub-step</button>
+                        <button class="btn-ghost btn-small" onClick=${() => insertStepAfter(s.id)}>+ Insert step below</button>
+                      </div>`}
+                  </div>
                 </div>`}
               </div>
             `)}
