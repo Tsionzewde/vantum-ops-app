@@ -330,6 +330,7 @@ function VantumNode({ id, data }) {
 
   const commitTitle = (e) => { ctx.update(id, { label: e.target.value.trim() || data.label }); setEditTitle(false); };
   const commitDetail = (e) => { ctx.update(id, { detail: e.target.value }); setEditDetail(false); };
+  const hasSubs = data.subs && data.subs.length > 0;
 
   return html`
     <div class="vnode" style=${{ borderTop: `3px solid ${data.color || "#059669"}` }}>
@@ -345,18 +346,17 @@ function VantumNode({ id, data }) {
           : html`<span class="vnode-title" title="Double-click to rename" onDoubleClick=${() => ctx.editable && setEditTitle(true)}>${data.label}</span>`}
       </div>
       ${data.phase && html`<div class="vnode-phase" style=${{ color: data.color || "#059669" }}>${data.phase}</div>`}
-      ${data.subs && data.subs.length > 0 && html`
-        <ul class="vnode-subs">${data.subs.map((x, i) => html`<li key=${i}>${x}</li>`)}</ul>`}
-      ${(data.detail || ctx.editable) && html`
+      ${(hasSubs || data.detail || ctx.editable) && html`
         <button class="vnode-more nodrag" onPointerDown=${stop} onClick=${(e) => { e.stopPropagation(); setOpen(!open); }}>
-          ${open ? "Hide details ▴" : "Details ▾"}
+          ${open ? "▴ Hide" : (hasSubs ? `▾ ${data.subs.length} sub-step${data.subs.length > 1 ? "s" : ""}` : "▾ Details")}
         </button>`}
-      ${open && html`
-        ${ctx.editable && editDetail
-          ? html`<textarea class="vnode-edit-area nodrag" defaultValue=${data.detail} autoFocus
-              onPointerDown=${stop} onBlur=${commitDetail}
-              onKeyDown=${(e) => { if (e.key === "Escape") setEditDetail(false); }}></textarea>`
-          : html`<div class="vnode-detail" title=${ctx.editable ? "Double-click to edit" : ""} onDoubleClick=${() => ctx.editable && setEditDetail(true)}>${data.detail || (ctx.editable ? "Double-click to add details…" : "")}</div>`}`}
+      ${open && (hasSubs
+        ? html`<ul class="vnode-subs">${data.subs.map((x, i) => html`<li key=${i}>${x}</li>`)}</ul>`
+        : (ctx.editable && editDetail
+            ? html`<textarea class="vnode-edit-area nodrag" defaultValue=${data.detail} autoFocus
+                onPointerDown=${stop} onBlur=${commitDetail}
+                onKeyDown=${(e) => { if (e.key === "Escape") setEditDetail(false); }}></textarea>`
+            : html`<div class="vnode-detail" title=${ctx.editable ? "Double-click to edit" : ""} onDoubleClick=${() => ctx.editable && setEditDetail(true)}>${data.detail || (ctx.editable ? "Double-click to add details…" : "")}</div>`))}
       <${Handle} id="out-b" type="source" position=${Position.Bottom} />
       <${Handle} id="out-r" type="source" position=${Position.Right} />
     </div>`;
@@ -468,6 +468,7 @@ function App() {
   const [editingId, setEditingId] = useState(null);
   const [panelOpen, setPanelOpen] = useState(true);
   const [stepDetailsOpen, setStepDetailsOpen] = useState(true);
+  const [view, setView] = useState("board"); // board | process
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   const edgeUpdateOk = useRef(true);
@@ -1021,14 +1022,20 @@ function App() {
     <${NodeEditCtx.Provider} value=${{ editable: !locked, update: updateNodeData }}>
       ${!hasContent
         ? html`<div class="landing-wrap">${funnel()}</div>`
-        : html`
-          <div class="page">
-            <div class="canvas-section">${board}</div>
-            <div class="text-section">
-              <div class="scroll-hint">Written process &amp; details</div>
-              ${detailsBlock}
-            </div>
-          </div>`}
+        : (view === "board"
+          ? html`
+            <div class="canvas-section">
+              ${board}
+              <button class="to-process" onClick=${() => setView("process")}>📋 Written process →</button>
+            </div>`
+          : html`
+            <div class="process-screen">
+              <div class="process-bar">
+                <button class="btn-ghost btn-small" onClick=${() => setView("board")}>← Back to board</button>
+                <span class="muted" style=${{ alignSelf: "center" }}>Written process &amp; details</span>
+              </div>
+              <div class="text-section">${detailsBlock}</div>
+            </div>`)}
       ${pasteOverlay}
       ${promptOverlay}
     <//>`;

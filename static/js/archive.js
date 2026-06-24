@@ -198,21 +198,22 @@ function Detail({ project, onBack, onDelete }) {
   const resources = Array.isArray(project.resources) ? project.resources : [];
   const approved = project.status === "Approved";
   const overview = (project.map_data && project.map_data.overview) || "";
+  const [dview, setDview] = useState("board");
   return html`
     <div class="detail-page">
       <div class="detail-actionbar">
         <button class="btn-ghost btn-small" onClick=${onBack}>← Back</button>
         <h2>${project.name}</h2>
         <span class=${"badge " + (approved ? "approved" : "active")}>${project.status || "Active"}</span>
+        <button class="btn-ghost btn-small" onClick=${() => setDview(dview === "board" ? "process" : "board")}>${dview === "board" ? "📋 Written process →" : "← Board"}</button>
         <button class="btn-ochre btn-small" onClick=${() => openClaude(jiraPrompt(project))}>↗ Push to Jira</button>
         <button class="btn-primary btn-small" onClick=${() => { window.location.href = "/?edit=" + project.id; }}>✎ Edit</button>
         <button class="btn-danger btn-small" onClick=${() => onDelete && onDelete(project)}>Delete</button>
       </div>
 
-      <div class="canvas-section"><div class="rf-fill"><${DetailMap} map=${project.map_data} /></div></div>
-
-      <div class="text-section">
-        <div class="scroll-hint">Overview, written process &amp; details</div>
+      ${dview === "board"
+        ? html`<div class="canvas-section"><div class="rf-fill"><${DetailMap} map=${project.map_data} /></div></div>`
+        : html`<div class="text-section">
         ${overview && html`<div class="detail-overview">${overview}</div>`}
         <div class="card">
           <span class="panel-title">Goal</span>
@@ -251,7 +252,7 @@ function Detail({ project, onBack, onDelete }) {
             })}
           </div>
         </div>
-      </div>
+      </div>`}
     </div>`;
 }
 

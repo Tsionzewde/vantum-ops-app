@@ -877,3 +877,25 @@ body[data-theme="light"] .react-flow__minimap { background: #FFFFFF !important; 
   color: var(--text);
   line-height: 1.55;
 }
+
+/* ---------- board <-> written-process screens (button, not scroll) ---------- */
+.to-process {
+  position: absolute;
+  top: 14px; right: 14px;
+  z-index: 7;
+  background: var(--green);
+  color: #fff;
+  font-weight: 700;
+  padding: 9px 15px;
+  border-radius: 10px;
+  box-shadow: 0 4px 14px rgba(5,150,105,0.3);
+}
+.to-process:hover { background: #06b07c; }
+.process-screen { min-height: calc(100vh - 59px); }
+.process-bar {
+  display: flex; gap: 12px; align-items: center;
+  padding: 12px 22px;
+  border-bottom: 1px solid var(--border-soft);
+  position: sticky; top: 59px; z-index: 8;
+  background: var(--bg);
+}
