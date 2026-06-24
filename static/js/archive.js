@@ -172,38 +172,25 @@ function openFileResource(r) {
 }
 
 function DetailMap({ map }) {
-  const [expanded, setExpanded] = useState(false);
-
-  useEffect(() => {
-    const onKey = (e) => { if (e.key === "Escape") setExpanded(false); };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, []);
-
   const nodes = (map && map.nodes) || [];
   const edges = (map && map.edges) || [];
   if (!nodes.length) {
-    return html`<div class="detail-map"><div class="empty-canvas"><div class="muted">No map saved for this project.</div></div></div>`;
+    return html`<div class="empty-canvas"><div class="muted">No map saved for this project.</div></div>`;
   }
   return html`
-    <div class=${"detail-map" + (expanded ? " expanded" : "")}>
-      <button class="btn-ghost btn-small map-expand" onClick=${() => setExpanded(!expanded)}>
-        ${expanded ? "✕ Close" : "⛶ Expand"}
-      </button>
-      <${ReactFlowProvider} key=${expanded ? "x" : "n"}>
-        <${ReactFlow}
-          nodes=${nodes} edges=${edges} nodeTypes=${nodeTypes}
-          nodesDraggable=${false} nodesConnectable=${false} elementsSelectable=${false}
-          minZoom=${0.2} maxZoom=${2}
-          fitView proOptions=${{ hideAttribution: true }}>
-          <${MeasureFix} ids=${nodes.map((n) => n.id)} />
-          <${Background} color="#1B2C45" gap=${22} />
-          <${Controls} showInteractive=${false} />
-          <${MiniMap} style=${{ background: "#0A1626", border: "1px solid #1B2C45" }}
-            nodeColor=${(n) => (n.data && n.data.color) || "#059669"} maskColor="rgba(3,10,23,0.6)" />
-        <//>
+    <${ReactFlowProvider}>
+      <${ReactFlow}
+        nodes=${nodes} edges=${edges} nodeTypes=${nodeTypes}
+        nodesDraggable=${false} nodesConnectable=${false} elementsSelectable=${false}
+        minZoom=${0.2} maxZoom=${2}
+        fitView fitViewOptions=${{ padding: 0.25 }} proOptions=${{ hideAttribution: true }}>
+        <${MeasureFix} ids=${nodes.map((n) => n.id)} />
+        <${Background} color="#1B2C45" gap=${22} />
+        <${Controls} showInteractive=${false} />
+        <${MiniMap} style=${{ background: "#0A1626", border: "1px solid #1B2C45" }}
+          nodeColor=${(n) => (n.data && n.data.color) || "#059669"} maskColor="rgba(3,10,23,0.6)" />
       <//>
-    </div>`;
+    <//>`;
 }
 
 function Detail({ project, onBack, onDelete }) {
@@ -212,22 +199,21 @@ function Detail({ project, onBack, onDelete }) {
   const approved = project.status === "Approved";
   const overview = (project.map_data && project.map_data.overview) || "";
   return html`
-    <div>
-      <div style=${{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "14px", flexWrap: "wrap" }}>
+    <div class="detail-page">
+      <div class="detail-actionbar">
         <button class="btn-ghost btn-small" onClick=${onBack}>← Back</button>
-        <h2 style=${{ margin: 0, flex: 1 }}>${project.name}</h2>
+        <h2>${project.name}</h2>
         <span class=${"badge " + (approved ? "approved" : "active")}>${project.status || "Active"}</span>
         <button class="btn-ochre btn-small" onClick=${() => openClaude(jiraPrompt(project))}>↗ Push to Jira</button>
         <button class="btn-primary btn-small" onClick=${() => { window.location.href = "/?edit=" + project.id; }}>✎ Edit</button>
         <button class="btn-danger btn-small" onClick=${() => onDelete && onDelete(project)}>Delete</button>
       </div>
 
-      ${overview && html`<div class="detail-overview">${overview}</div>`}
+      <div class="canvas-section"><div class="rf-fill"><${DetailMap} map=${project.map_data} /></div></div>
 
-      <span class="panel-title">Process map</span>
-      <${DetailMap} map=${project.map_data} />
-
-      <div class="detail-text">
+      <div class="text-section">
+        <div class="scroll-hint">Overview, written process &amp; details</div>
+        ${overview && html`<div class="detail-overview">${overview}</div>`}
         <div class="card">
           <span class="panel-title">Goal</span>
           <div>${project.goal || html`<span class="muted">—</span>`}</div>
@@ -305,7 +291,7 @@ function Archive() {
   }
 
   if (active) {
-    return html`<div class="archive-wrap"><${Detail} project=${active} onBack=${() => setActive(null)} onDelete=${deleteProject} /></div>`;
+    return html`<${Detail} project=${active} onBack=${() => setActive(null)} onDelete=${deleteProject} />`;
   }
 
   return html`

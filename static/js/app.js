@@ -28,7 +28,7 @@ const EDGE_OPTS = {
   markerEnd: { type: MarkerType.ArrowClosed, color: "#059669" },
 };
 
-const MAX_FILE_BYTES = 1.5 * 1024 * 1024; // per uploaded resource
+const MAX_FILE_BYTES = 3 * 1024 * 1024; // per uploaded resource (stored in-row; Storage upgrade needed for bigger)
 
 const EXAMPLE_DESC =
   "I want to build a free “5-Day Email Audit” guide as a lead magnet to grow my newsletter. " +
@@ -246,9 +246,10 @@ function buildFlowFromSteps(steps, projectName, overview) {
     rowOf[s.id] = rowCount[c]++;
   });
 
-  const COL_W = 380, ROW_H = 220, START_X = 60, NODE_HALF = 140;
+  const COL_W = 380, ROW_H = 230, START_X = 60, NODE_HALF = 140;
   const hasRoot = !!(projectName && projectName.trim());
-  const yBase = hasRoot ? 150 : 40;
+  // header is taller when it carries an overview — push the first row down so they don't overlap
+  const yBase = hasRoot ? (overview && overview.trim() ? 270 : 160) : 40;
   const maxCol = Math.max(0, ...steps.map((s) => colOf[s.id]));
 
   const nodes = steps.map((s, i) => ({
@@ -344,6 +345,8 @@ function VantumNode({ id, data }) {
           : html`<span class="vnode-title" title="Double-click to rename" onDoubleClick=${() => ctx.editable && setEditTitle(true)}>${data.label}</span>`}
       </div>
       ${data.phase && html`<div class="vnode-phase" style=${{ color: data.color || "#059669" }}>${data.phase}</div>`}
+      ${data.subs && data.subs.length > 0 && html`
+        <ul class="vnode-subs">${data.subs.map((x, i) => html`<li key=${i}>${x}</li>`)}</ul>`}
       ${(data.detail || ctx.editable) && html`
         <button class="vnode-more nodrag" onPointerDown=${stop} onClick=${(e) => { e.stopPropagation(); setOpen(!open); }}>
           ${open ? "Hide details ▴" : "Details ▾"}
@@ -353,9 +356,7 @@ function VantumNode({ id, data }) {
           ? html`<textarea class="vnode-edit-area nodrag" defaultValue=${data.detail} autoFocus
               onPointerDown=${stop} onBlur=${commitDetail}
               onKeyDown=${(e) => { if (e.key === "Escape") setEditDetail(false); }}></textarea>`
-          : html`<div class="vnode-detail" title=${ctx.editable ? "Double-click to edit" : ""} onDoubleClick=${() => ctx.editable && setEditDetail(true)}>${data.detail || (ctx.editable ? "Double-click to add details…" : "")}</div>`}
-        ${data.subs && data.subs.length > 0 && html`
-          <ul class="vnode-subs">${data.subs.map((x, i) => html`<li key=${i}>${x}</li>`)}</ul>`}`}
+          : html`<div class="vnode-detail" title=${ctx.editable ? "Double-click to edit" : ""} onDoubleClick=${() => ctx.editable && setEditDetail(true)}>${data.detail || (ctx.editable ? "Double-click to add details…" : "")}</div>`}`}
       <${Handle} id="out-b" type="source" position=${Position.Bottom} />
       <${Handle} id="out-r" type="source" position=${Position.Right} />
     </div>`;
@@ -517,11 +518,8 @@ function App() {
       launchClaude(IDEA_PROMPT(desc.trim()));
     } else if (inputMode === "call") {
       launchClaude(CALL_PROMPT(callRef, callPerson.trim() || "me"));
-    } else if (inputMode === "extract") {
-      launchClaude(EXTRACT_PROMPT());
     } else {
-      if (!finishedDesc.trim()) { toast("Describe the finished project first."); return; }
-      launchClaude(REVERSE_PROMPT(finishedDesc.trim()));
+      launchClaude(EXTRACT_PROMPT());
     }
   }
 
@@ -637,7 +635,7 @@ function App() {
     const files = Array.from(e.target.files || []);
     files.forEach((file) => {
       if (file.size > MAX_FILE_BYTES) {
-        toast(`"${file.name}" is too big — keep uploads under 1.5 MB each.`);
+        toast(`"${file.name}" is too big — keep uploads under 3 MB each.`);
         return;
       }
       const reader = new FileReader();
@@ -768,7 +766,6 @@ function App() {
             <button class=${"mode" + (inputMode === "idea" ? " on" : "")} disabled=${locked} onClick=${() => setInputMode("idea")}>💡 Idea</button>
             <button class=${"mode" + (inputMode === "call" ? " on" : "")} disabled=${locked} onClick=${() => setInputMode("call")}>🎙️ From a call</button>
             <button class=${"mode" + (inputMode === "extract" ? " on" : "")} disabled=${locked} onClick=${() => setInputMode("extract")}>📋 From my Claude chat</button>
-            <button class=${"mode" + (inputMode === "finished" ? " on" : "")} disabled=${locked} onClick=${() => setInputMode("finished")}>📦 Finished project</button>
           </div>
 
           ${inputMode === "idea" && html`
@@ -819,23 +816,11 @@ function App() {
 
           ${inputMode === "extract" && html`
             <div class="field">
-              <label>Already planned it in Claude?</label>
-              <div class="muted">If you've worked the whole thing out in a Claude chat, this gives you a prompt to drop into <em>that same chat</em> — Claude turns it into the process. Then paste the JSON back.</div>
+              <label>Already worked it out in Claude?</label>
+              <div class="muted">Whether you <em>planned</em> it or already <em>built</em> it in a Claude chat, this gives you a prompt to drop into <em>that same chat</em> — Claude turns the real work into the process (steps + resources). Then paste the JSON back. No re-explaining, no guessing.</div>
             </div>
             <div class="row" style=${{ marginTop: "12px" }}>
               <button class="btn-primary" disabled=${locked} onClick=${startWithClaude}>Get the extract prompt</button>
-              <button class="btn-ghost" disabled=${locked} onClick=${() => setPasteOpen(true)}>Paste Claude Output</button>
-            </div>`}
-
-          ${inputMode === "finished" && html`
-            <div class="field">
-              <label>Paste a link or one line <span class="hint">— Claude does the rest</span></label>
-              <textarea rows="3" disabled=${locked} value=${finishedDesc} onInput=${(e) => setFinishedDesc(e.target.value)}
-                placeholder="A repo/doc/live link, or one sentence — e.g. “the lead-magnet landing page in Carrd”. No writing-up needed."></textarea>
-            </div>
-            <div class="muted" style=${{ marginBottom: "4px" }}>No admin work — give the lightest hint and Claude reconstructs the process.</div>
-            <div class="row" style=${{ marginTop: "12px" }}>
-              <button class="btn-primary" disabled=${locked} onClick=${startWithClaude}>Reverse-engineer with Claude</button>
               <button class="btn-ghost" disabled=${locked} onClick=${() => setPasteOpen(true)}>Paste Claude Output</button>
             </div>`}
         </div>`;
@@ -922,7 +907,7 @@ function App() {
                 <button class="btn-ghost btn-small" onClick=${() => fileInputRef.current && fileInputRef.current.click()}>⬆ Upload file</button>
               </div>
               <input type="file" multiple style=${{ display: "none" }} ref=${fileInputRef} onChange=${onFilePicked} />
-              <div class="muted" style=${{ marginTop: "8px" }}>Files up to 1.5 MB each — PDFs, docs, images.</div>`}
+              <div class="muted" style=${{ marginTop: "8px" }}>Files up to 3 MB each — PDFs, docs, images.</div>`}
           </div>
 
           <div class="card" style=${{ display: "flex", gap: "10px", alignItems: "center" }}>
@@ -976,7 +961,10 @@ function App() {
           elementsSelectable=${!locked}
           deleteKeyCode=${locked ? null : ["Backspace", "Delete"]}
           defaultEdgeOptions=${EDGE_OPTS}
+          connectOnClick=${true}
+          connectionRadius=${40}
           fitView
+          fitViewOptions=${{ padding: 0.25 }}
           proOptions=${{ hideAttribution: true }}>
           <${MeasureFix} ids=${nodes.map((n) => n.id)} />
           <${Background} color="#1B2C45" gap=${22} />

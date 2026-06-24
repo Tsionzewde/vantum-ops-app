@@ -562,12 +562,21 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 
 /* connection handles on all four sides */
 .react-flow__handle {
-  width: 9px;
-  height: 9px;
+  width: 16px;
+  height: 16px;
   background: var(--green);
-  border: 2px solid var(--bg);
+  border: 3px solid var(--bg);
 }
-.react-flow__handle:hover { background: #06d391; }
+.react-flow__handle:hover { background: #06d391; box-shadow: 0 0 0 4px rgba(5,150,105,0.25); }
+/* sub-steps on the node */
+.vnode-subs {
+  margin: 9px 0 0;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.vnode-subs li { margin-bottom: 3px; }
 
 /* ---------- toast ---------- */
 .toast {
@@ -846,5 +855,25 @@ body[data-theme="light"] .react-flow__minimap { background: #FFFFFF !important; 
   padding: 12px 16px;
   color: var(--text);
   font-size: 14px;
+  line-height: 1.55;
+}
+
+/* ---------- archive detail: board-first (matches builder) ---------- */
+.detail-actionbar {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 22px;
+  border-bottom: 1px solid var(--border-soft);
+  flex-wrap: wrap;
+}
+.detail-actionbar h2 { margin: 0; flex: 1; font-size: 18px; }
+.detail-page .canvas-section { height: calc(100vh - 124px); }
+.detail-page .rf-fill { position: absolute; inset: 0; }
+.detail-overview {
+  background: var(--ochre-soft);
+  border: 1px solid rgba(201,123,0,0.4);
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 16px;
+  color: var(--text);
   line-height: 1.55;
 }
